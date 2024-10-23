@@ -84,6 +84,7 @@
       state: started
       enabled: yes
       daemon_reload: yes
+    
 
   - name: Add vagrant user to docker group
     user:
@@ -102,7 +103,7 @@
   - name: Disable swap
     command: swapoff -a
     when: ansible_swaptotal_mb > 0
-
+  
   - name: Add Kubernetes GPG apt key
     apt_key:
       url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
@@ -113,23 +114,12 @@
       repo: deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /
       state: present
       filename: kubernetes.list  
-  
-  # - name: Add an apt signing key for Kubernetes
-  #   apt_key:
-  #     url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
-  #     state: present
-
-  # - name: Adding apt repository for Kubernetes
-  #   apt_repository:
-  #     repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
-  #     state: present
-  #     filename: kubernetes.list
 
   - name: Install Kubernetes binaries
     apt: 
       name: "{{ packages }}"
       state: present
-      update_cache: yes
+      update_cache: yes          
       allow_unauthenticated: yes
     vars:
       packages:
@@ -147,6 +137,7 @@
       name: kubelet
       daemon_reload: yes
       state: restarted
+  
   - name: Restart containerd
     systemd:
       name: containerd
@@ -169,65 +160,16 @@
         - socat
       state: present
 
-  - name: Initialize Kubernetes cluster
-    command: >
-      kubeadm init
-      --apiserver-advertise-address=192.168.56.10
-      --apiserver-cert-extra-sans=192.168.56.10
-      --node-name k8s-master
-      --pod-network-cidr=192.168.0.0/16
-      --ignore-preflight-errors=Mem
-    register: kubeadm_init
 
-  # - name: Initialize the Kubernetes cluster using kubeadm
-  #   command: kubeadm init --apiserver-advertise-address="192.168.56.10" --apiserver-cert-extra-sans="192.168.56.10"  --node-name k8s-master --pod-network-cidr=192.168.0.0/16
-
-  - name: Setup kubeconfig for vagrant user
-    command: "{{ item }}"
-    with_items:
-     - mkdir -p /home/vagrant/.kube
-     - cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
-     - chown vagrant:vagrant /home/vagrant/.kube/config 
-
-  - name: Install calico pod network
-    become: false
-    command: kubectl create -f https://docs.projectcalico.org/manifests/calico.yaml
-
-  - name: Generate join command
-    command: kubeadm token create --print-join-command
-    register: join_command
-
-  - name: Save join command to file
-    copy:
-      content: "{{ join_command.stdout }}"
-      dest: "/tmp/join-command"
-      mode: '0644'
-
-  - name: Fetch join command
-    fetch:
-      src: "/tmp/join-command"
-      dest: "./join-command"
-      flat: yes
-    become: no
-
-  - name: Write join command to local file
-    local_action:
-      module: copy
-      content: "{{ join_command.stdout_lines[0] }}"
-      dest: "./join-command"
+  - name: Copy the join command to server location
+    copy: 
+      src: join-command 
+      dest: /tmp/join-command.sh 
       mode: '0755'
-    become: no
 
+  - name: Join the node to cluster
+    command: sh /tmp/join-command.sh
 
-  # # - name: Copy join command to local file
-  # #   local_action: copy content="{{ join_command.stdout_lines[0] }}" dest="./join-command"
-  # - name: Copy join command to local file 
-  #   local_action: 
-  #     module: copy 
-  #     content: "{{ join_command.stdout_lines[0] }}" 
-  #     dest: "./join-command" 
-  #     mode: '0755'  # Make the file executable if necessary
-  
   handlers:
     - name: docker status
       service: name=docker state=started
