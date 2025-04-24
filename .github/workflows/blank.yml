@@ -50,7 +50,11 @@ jobs:
     
     - name: Set permissions for SSH key
       run: chmod 600 ~/.ssh/id_rsa
-    
+    - name: Check VirtualBox network status
+      run: |
+        VBoxManage list hostonlyifs
+        VBoxManage list vms
+        VBoxManage list runningvms
     - name: Run Vagrant
       run: |
         # Clean up any previous runs
