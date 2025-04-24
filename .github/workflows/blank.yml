@@ -13,9 +13,9 @@ jobs:
 
     - name: Install VirtualBox and Vagrant dependencies
       run: |
-        brew install virtualbox
-        brew install vagrant
-        brew install ansible
+        arch -x86_64 /usr/local/bin/brew install --cask virtualbox
+        arch -x86_64 /usr/local/bin/brew install vagrant
+        arch -x86_64 /usr/local/bin/brew install ansible
 
     - name: Set up Vagrant environment for master node
       run: |
