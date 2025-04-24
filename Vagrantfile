@@ -1,10 +1,10 @@
-IMAGE_NAME = "ubuntu:20.04"  # Docker image
+IMAGE_NAME = "tknerr/baseimage-ubuntu:18.04"  # This image has SSH set up  # Docker image
 N = 2
 
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
-    
+    config.vm.boot_timeout = 600
     # Set Docker as the provider with base settings
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
@@ -12,6 +12,7 @@ Vagrant.configure("2") do |config|
         d.remains_running = true
         d.privileged = true  # Needed for systemd and many Kubernetes components
         d.create_args = ["--cap-add=NET_ADMIN", "--cap-add=SYS_ADMIN"]  # Required capabilities
+        d.ports = ["2222:22"]
     end
       
     config.vm.define "k8s-master" do |master|
