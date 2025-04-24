@@ -1,10 +1,11 @@
-IMAGE_NAME = "tknerr/baseimage-ubuntu:18.04"  # This image has SSH set up  # Docker image
+IMAGE_NAME = "geerlingguy/docker-ubuntu2004-ansible" # Has both SSH and Ansible pre-installed  # This image has SSH set up  # Docker image
 N = 2
 
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
     config.vm.boot_timeout = 600
+    config.vm.provision "shell", inline: "apt-get update && apt-get install -y python3 python3-pip"
     # Set Docker as the provider with base settings
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
