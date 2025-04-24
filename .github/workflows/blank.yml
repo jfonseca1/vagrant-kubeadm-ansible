@@ -1,9 +1,6 @@
-name: Kubernetes Cluster Setup (Vagrant + Ansible)
-
+name: Kubernetes Cluster Setup (Vagrant + Docker)
 on: [push]
-
 jobs:
-
   prepare-environment:
       runs-on: ubuntu-latest
       steps:
@@ -20,6 +17,7 @@ jobs:
         with:
           name: ssh-key
           path: ~/.ssh/id_rsa
+
   # Job for provisioning the master node
   setup-master:
     runs-on: [self-hosted, macos]
@@ -27,14 +25,15 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
-    - name: Install QEMU
+
+    - name: Install Docker and Vagrant dependencies
       run: |
-        arch -arm64 brew install qemu
-    - name: Install VirtualBox and Vagrant dependencies
-      run: |
-        arch -x86_64 /usr/local/bin/brew install --cask virtualbox
-        arch -x86_64 /usr/local/bin/brew install vagrant
-        arch -x86_64 /usr/local/bin/brew install ansible
+        arch -arm64 brew install docker
+        arch -arm64 brew install vagrant
+        arch -arm64 brew install ansible
+
+    - name: Create Docker network
+      run: docker network create k8s-net || true
 
     - name: Download SSH key artifact
       uses: actions/download-artifact@v4
@@ -44,44 +43,54 @@ jobs:
     
     - name: Set permissions for SSH key
       run: chmod 600 ~/.ssh/id_rsa
-    - name: Check VirtualBox network status
-      run: |
-        VBoxManage list hostonlyifs
-        VBoxManage list vms
-        VBoxManage list runningvms
         
     - name: Set up Vagrant environment for master node
       run: |
-        vagrant plugin install vagrant-parallels
+        vagrant plugin install vagrant-docker-compose
         vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 --provider=parallels || true
-        vagrant up --provider=parallels k8s-master
+        vagrant up --provider=docker k8s-master
+
+    - name: Verify Docker containers
+      run: docker ps -a
 
     - name: Provision master node with Ansible
       run: |
         vagrant ssh k8s-master -c "sudo ansible-playbook /vagrant/kubernetes-setup/master-playbook.yml"
 
-  # Job for provisioning worker nodes (parallel with the master node)
+  # Job for provisioning worker nodes
   setup-workers:
     runs-on: [self-hosted, macos]
     needs: setup-master  # Ensure workers start after the master is provisioned
-
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    - name: Install VirtualBox and Vagrant dependencies
+    - name: Install Docker and Vagrant dependencies
       run: |
-        brew install virtualbox
-        brew install vagrant
-        brew install ansible
+        arch -arm64 brew install docker
+        arch -arm64 brew install vagrant
+        arch -arm64 brew install ansible
+
+    - name: Create Docker network
+      run: docker network create k8s-net || true
+
+    - name: Download SSH key artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ssh-key
+        path: ~/.ssh/
+    
+    - name: Set permissions for SSH key
+      run: chmod 600 ~/.ssh/id_rsa
 
     - name: Set up Vagrant environment for worker nodes
       run: |
-        vagrant plugin install vagrant-parallels
-        vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 --provider=parallels || true
-        vagrant up --provider=parallels node-1 node-2
+        vagrant plugin install vagrant-docker-compose
+        # Note: We don't destroy existing containers here to preserve the master
+        vagrant up --provider=docker node-1 node-2
+
+    - name: Verify Docker containers
+      run: docker ps -a
 
     - name: Provision worker nodes with Ansible
       run: |
