@@ -6,7 +6,7 @@ Vagrant.configure("2") do |config|
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
     config.vm.boot_timeout = 600
     config.vm.provision "shell", inline: "apt-get update && apt-get install -y python3 python3-pip"
-    config.vm.network "forwarded_port", guest: 22, host: 2201
+    config.vm.network :forwarded_port, guest: 22, host: 2222, auto_correct: true
     # Set Docker as the provider with base settings
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
