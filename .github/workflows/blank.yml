@@ -29,7 +29,7 @@ jobs:
       uses: actions/checkout@v4
     - name: Install QEMU
       run: |
-        brew install qemu
+        arch -arm64 brew install qemu
     - name: Install VirtualBox and Vagrant dependencies
       run: |
         arch -x86_64 /usr/local/bin/brew install --cask virtualbox
@@ -53,8 +53,8 @@ jobs:
     - name: Set up Vagrant environment for master node
       run: |
         vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 --quemu virtualbox || true
-        vagrant up --provider quemu k8s-master
+        vagrant box add bento/ubuntu-16.04 --qemu virtualbox || true
+        vagrant up --provider qemu k8s-master
 
     - name: Provision master node with Ansible
       run: |
