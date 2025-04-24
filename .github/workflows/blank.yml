@@ -25,25 +25,23 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install VirtualBox
+    - name: Install VirtualBox and dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y software-properties-common
+        sudo apt-get install -y software-properties-common wget
         sudo add-apt-repository "deb [arch=amd64] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib"
         wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
         sudo apt-get update
-        sudo apt-get install -y virtualbox-7.0
-        # Verify installation
-        vboxmanage --version
-    
+        sudo apt-get install -y virtualbox-7.0 dkms
+        sudo /sbin/vboxconfig
+        
     - name: Install Vagrant
       run: |
         wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
         echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
         sudo apt update && sudo apt install -y vagrant
-        # Verify installation
-        vagrant --version
-    
+        vagrant plugin install vagrant-vbguest
+        
     - name: Download SSH key artifact
       uses: actions/download-artifact@v4
       with:
@@ -55,5 +53,11 @@ jobs:
     
     - name: Run Vagrant
       run: |
-        vagrant box add bento/ubuntu-16.04 --provider virtualbox
-        vagrant up --provider virtualbox
+        # Clean up any previous runs
+        vagrant destroy -f || true
+        
+        # Add box with retry
+        vagrant box add bento/ubuntu-16.04 --provider virtualbox || true
+        
+        # Run with debug logging
+        VAGRANT_LOG=debug vagrant up --provider virtualbox || (vagrant destroy -f && exit 1)
