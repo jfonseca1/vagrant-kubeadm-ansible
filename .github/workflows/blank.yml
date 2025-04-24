@@ -3,10 +3,27 @@ name: Kubernetes Cluster Setup (Vagrant + Ansible)
 on: [push]
 
 jobs:
+
+  prepare-environment:
+      runs-on: ubuntu-latest
+      steps:
+      - uses: actions/checkout@v4
+      
+      - name: Generate SSH key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
+          chmod 600 ~/.ssh/id_rsa
+          
+      - name: Upload SSH key as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-key
+          path: ~/.ssh/id_rsa
   # Job for provisioning the master node
   setup-master:
     runs-on: [self-hosted, macos]
-
+    needs: prepare-environment
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
@@ -17,6 +34,20 @@ jobs:
         arch -x86_64 /usr/local/bin/brew install vagrant
         arch -x86_64 /usr/local/bin/brew install ansible
 
+    - name: Download SSH key artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ssh-key
+        path: ~/.ssh/
+    
+    - name: Set permissions for SSH key
+      run: chmod 600 ~/.ssh/id_rsa
+    - name: Check VirtualBox network status
+      run: |
+        VBoxManage list hostonlyifs
+        VBoxManage list vms
+        VBoxManage list runningvms
+        
     - name: Set up Vagrant environment for master node
       run: |
         vagrant destroy -f || true
