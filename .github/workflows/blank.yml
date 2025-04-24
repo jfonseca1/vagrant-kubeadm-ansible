@@ -1,67 +1,54 @@
-name: kubernetes-vagrant-cluster
+name: Kubernetes Cluster Setup (Vagrant + Ansible)
+
 on: [push]
 
 jobs:
-  prepare-environment:
-    runs-on: ubuntu-latest
+  # Job for provisioning the master node
+  setup-master:
+    runs-on: [self-hosted, macos]
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Generate SSH key
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Install VirtualBox and Vagrant dependencies
       run: |
-        mkdir -p ~/.ssh
-        ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
-        chmod 600 ~/.ssh/id_rsa
-        
-    - name: Upload SSH key as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ssh-key
-        path: ~/.ssh/id_rsa
-        
-  run-vagrant:
-    needs: prepare-environment
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install VirtualBox and dependencies
+        brew install virtualbox
+        brew install vagrant
+        brew install ansible
+
+    - name: Set up Vagrant environment for master node
       run: |
-        sudo apt-get update
-        sudo apt-get install -y software-properties-common wget
-        sudo add-apt-repository "deb [arch=amd64] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib"
-        wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
-        sudo apt-get update
-        sudo apt-get install -y virtualbox-7.0 dkms
-        sudo /sbin/vboxconfig
-        
-    - name: Install Vagrant
-      run: |
-        wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-        sudo apt update && sudo apt install -y vagrant
-        vagrant plugin install vagrant-vbguest
-        
-    - name: Download SSH key artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: ssh-key
-        path: ~/.ssh/
-    
-    - name: Set permissions for SSH key
-      run: chmod 600 ~/.ssh/id_rsa
-    - name: Check VirtualBox network status
-      run: |
-        VBoxManage list hostonlyifs
-        VBoxManage list vms
-        VBoxManage list runningvms
-    - name: Run Vagrant
-      run: |
-        # Clean up any previous runs
         vagrant destroy -f || true
-        
-        # Add box with retry
         vagrant box add bento/ubuntu-16.04 --provider virtualbox || true
-        
-        # Run with debug logging
-        VAGRANT_LOG=debug vagrant up --provider virtualbox || (vagrant destroy -f && exit 1)
+        vagrant up --provider virtualbox k8s-master
+
+    - name: Provision master node with Ansible
+      run: |
+        vagrant ssh k8s-master -c "sudo ansible-playbook /vagrant/kubernetes-setup/master-playbook.yml"
+
+  # Job for provisioning worker nodes (parallel with the master node)
+  setup-workers:
+    runs-on: [self-hosted, macos]
+    needs: setup-master  # Ensure workers start after the master is provisioned
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Install VirtualBox and Vagrant dependencies
+      run: |
+        brew install virtualbox
+        brew install vagrant
+        brew install ansible
+
+    - name: Set up Vagrant environment for worker nodes
+      run: |
+        vagrant destroy -f || true
+        vagrant box add bento/ubuntu-16.04 --provider virtualbox || true
+        vagrant up --provider virtualbox node-1 node-2
+
+    - name: Provision worker nodes with Ansible
+      run: |
+        vagrant ssh node-1 -c "sudo ansible-playbook /vagrant/kubernetes-setup/node-playbook.yml"
+        vagrant ssh node-2 -c "sudo ansible-playbook /vagrant/kubernetes-setup/node-playbook.yml"
