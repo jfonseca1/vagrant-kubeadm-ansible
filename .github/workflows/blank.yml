@@ -1,4 +1,5 @@
 name: kubernetes-vagrant-cluster
+
 on: [push]
 
 jobs:
@@ -6,31 +7,24 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up WSL2
       shell: powershell
       run: |
-        # Enable WSL and Virtual Machine Platform
         Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart
         Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart
-        
-        # Set WSL2 as default
         wsl --set-default-version 2
-        
-        # Install Ubuntu 20.04 in WSL2
         Invoke-WebRequest -Uri https://aka.ms/wslubuntu2004 -OutFile Ubuntu.appx -UseBasicParsing
         Add-AppxPackage -Path Ubuntu.appx
-        
-        # Initialize WSL
         wsl -d Ubuntu-20.04 -e sh -c "echo 'WSL initialized'"
-        
+
     - name: Generate SSH key in WSL
       shell: wsl-bash {0}
       run: |
         mkdir -p ~/.ssh
         ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
         chmod 600 ~/.ssh/id_rsa
-        
+
     - name: Upload SSH key as artifact
       uses: actions/upload-artifact@v4
       with:
@@ -42,85 +36,71 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Install VirtualBox on Windows
       shell: powershell
       run: |
-        # Download and install VirtualBox
         $vboxUrl = "https://download.virtualbox.org/virtualbox/7.0.12/VirtualBox-7.0.12-159484-Win.exe"
         $installerPath = "$env:TEMP\VirtualBox.exe"
         Invoke-WebRequest -Uri $vboxUrl -OutFile $installerPath
         Start-Process -FilePath $installerPath -Args "--silent" -Wait
-        
-        # Add VirtualBox to PATH
         $vboxPath = "${env:ProgramFiles}\Oracle\VirtualBox"
         echo "$vboxPath" | Out-File -FilePath $env:GITHUB_PATH -Append
-        
+
     - name: Install Vagrant on Windows
       shell: powershell
       run: |
-        # Download and install Vagrant
         $vagrantUrl = "https://releases.hashicorp.com/vagrant/2.4.0/vagrant_2.4.0_windows_amd64.msi"
         $installerPath = "$env:TEMP\Vagrant.msi"
         Invoke-WebRequest -Uri $vagrantUrl -OutFile $installerPath
         Start-Process -FilePath "msiexec.exe" -Args "/i $installerPath /quiet" -Wait
-        
-        # Add Vagrant to PATH
         $vagrantPath = "${env:ProgramFiles}\HashiCorp\Vagrant\bin"
         echo "$vagrantPath" | Out-File -FilePath $env:GITHUB_PATH -Append
-        
+
     - name: Download SSH key artifact
       uses: actions/download-artifact@v4
       with:
         name: ssh-key
         path: ${{ github.workspace }}\.ssh
-        
+
     - name: Copy SSH key to WSL
       shell: powershell
       run: |
         $wslHome = wsl -d Ubuntu-20.04 -e sh -c "echo `$HOME"
         Copy-Item -Path "${{ github.workspace }}\.ssh\id_rsa" -Destination "\\wsl$\Ubuntu-20.04$wslHome\.ssh\id_rsa"
-        
+
     - name: Set up WSL environment
       shell: wsl-bash {0}
       run: |
-        # Install required packages in WSL
         sudo apt-get update
         sudo apt-get install -y git curl
-        
-        # Configure SSH
         chmod 600 ~/.ssh/id_rsa
         eval $(ssh-agent)
         ssh-add ~/.ssh/id_rsa
-        
+
     - name: Run Vagrant in WSL
       shell: wsl-bash {0}
       run: |
-        cd /mnt/${{ github.workspace.split(':')[1].replace('\','/') }}
-        
-        # Install Vagrant plugins
+        workspace_path=$(wslpath -a "$GITHUB_WORKSPACE")
+        cd "$workspace_path"
+
         vagrant plugin install vagrant-vbguest
         vagrant plugin install vagrant-reload
-        
-        # Clean up any existing VMs
         vagrant destroy -f || true
-        
-        # Add box with retry
+
         for i in {1..3}; do
           vagrant box add bento/ubuntu-16.04 --provider virtualbox && break || sleep 10
         done
-        
-        # Run with debug logging
+
         VAGRANT_LOG=debug vagrant up || (vagrant destroy -f && exit 1)
-        
+
     - name: Cleanup on failure
       if: failure()
       shell: powershell
       run: |
-        # Clean up Vagrant in WSL
-        wsl -d Ubuntu-20.04 -e sh -c "cd /mnt/$('${{ github.workspace.split(':')[1] }}'.replace('\','/')) && vagrant destroy -f"
-        
-        # Clean VirtualBox VMs
+        $wslPath = wsl -d Ubuntu-20.04 -e bash -c "wslpath -a \"${GITHUB_WORKSPACE}\""
+        wsl -d Ubuntu-20.04 -e sh -c "cd $wslPath && vagrant destroy -f"
+
         & "${env:ProgramFiles}\Oracle\VirtualBox\VBoxManage.exe" list vms | ForEach-Object {
           $vmName = $_.Split(' ')[0].Trim('"')
           & "${env:ProgramFiles}\Oracle\VirtualBox\VBoxManage.exe" unregistervm $vmName --delete
