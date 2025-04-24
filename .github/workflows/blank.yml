@@ -53,8 +53,8 @@ jobs:
     - name: Set up Vagrant environment for master node
       run: |
         vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 --provider virtualbox || true
-        vagrant up --provider virtualbox k8s-master
+        vagrant box add bento/ubuntu-16.04 --quemu virtualbox || true
+        vagrant up --provider quemu k8s-master
 
     - name: Provision master node with Ansible
       run: |
@@ -78,8 +78,8 @@ jobs:
     - name: Set up Vagrant environment for worker nodes
       run: |
         vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 --provider virtualbox || true
-        vagrant up --provider virtualbox node-1 node-2
+        vagrant box add bento/ubuntu-16.04 --provider qemu || true
+        vagrant up --provider qemu node-1 node-2
 
     - name: Provision worker nodes with Ansible
       run: |
