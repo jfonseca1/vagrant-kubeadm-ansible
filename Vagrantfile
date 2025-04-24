@@ -24,7 +24,6 @@ Vagrant.configure("2") do |config|
             ansible.config_file = "ansible.cfg"
             ansible.playbook = "kubernetes-setup/master-playbook.yml"
             ansible.extra_vars = {
-                ansible_python_interpreter: "/usr/bin/python3"
                 node_ip: "192.168.56.10",
             }
         end
@@ -39,7 +38,6 @@ Vagrant.configure("2") do |config|
                 ansible.config_file = "ansible.cfg"
                 ansible.playbook = "kubernetes-setup/node-playbook.yml"
                 ansible.extra_vars = {
-                    ansible_python_interpreter: "/usr/bin/python3"
                     node_ip: "192.168.56.#{i + 10}",
                 }
                 # Add custom SSH args to use vagrant insecure key
