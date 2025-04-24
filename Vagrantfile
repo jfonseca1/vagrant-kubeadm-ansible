@@ -20,9 +20,11 @@ Vagrant.configure("2") do |config|
         master.vm.hostname = "k8s-master"
         master.vm.network "private_network", ip: "192.168.56.10", docker_network: "k8s-net"
         master.vm.provision "ansible" do |ansible|
+            ansible.compatibility_mode = "2.0"
             ansible.config_file = "ansible.cfg"
             ansible.playbook = "kubernetes-setup/master-playbook.yml"
             ansible.extra_vars = {
+                ansible_python_interpreter: "/usr/bin/python3"
                 node_ip: "192.168.56.10",
             }
         end
@@ -33,9 +35,11 @@ Vagrant.configure("2") do |config|
             node.vm.hostname = "node-#{i}"
             node.vm.network "private_network", ip: "192.168.56.#{i + 10}", docker_network: "k8s-net"
             node.vm.provision "ansible" do |ansible|
+                ansible.compatibility_mode = "2.0"
                 ansible.config_file = "ansible.cfg"
                 ansible.playbook = "kubernetes-setup/node-playbook.yml"
                 ansible.extra_vars = {
+                    ansible_python_interpreter: "/usr/bin/python3"
                     node_ip: "192.168.56.#{i + 10}",
                 }
                 # Add custom SSH args to use vagrant insecure key
