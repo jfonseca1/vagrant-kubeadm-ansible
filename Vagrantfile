@@ -11,7 +11,7 @@ Vagrant.configure("2") do |config|
       
     config.vm.define "k8s-master" do |master|
         master.vm.box = IMAGE_NAME
-        master.vm.network "private_network", ip: "192.168.56.10"
+        master.vm.network "private_network", ip: "192.168.56.10", type: "dhcp", family: "IPv4"
         master.vm.hostname = "k8s-master"
         master.vm.provision "ansible" do |ansible|
             ansible.config_file = "ansible.cfg"
@@ -25,7 +25,7 @@ Vagrant.configure("2") do |config|
     (1..N).each do |i|
         config.vm.define "node-#{i}" do |node|
             node.vm.box = IMAGE_NAME
-            node.vm.network "private_network", ip: "192.168.56.#{i + 10}"
+            node.vm.network "private_network", ip: "192.168.56.#{i + 10}", type: "dhcp", family: "IPv4"
             node.vm.hostname = "node-#{i}"
             node.vm.provision "ansible" do |ansible|
                 ansible.config_file = "ansible.cfg"
