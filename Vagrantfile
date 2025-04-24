@@ -1,4 +1,4 @@
-IMAGE_NAME = "ubuntu/xenial64" # Has both SSH and Ansible pre-installed  # This image has SSH set up  # Docker image
+IMAGE_NAME = "ubuntu:20.04" # Has both SSH and Ansible pre-installed  # This image has SSH set up  # Docker image
 N = 2
 
 Vagrant.configure("2") do |config|
