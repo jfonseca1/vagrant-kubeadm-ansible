@@ -2,6 +2,8 @@ name: kubernetes-vagrant-cluster
 on: [push]
 
 jobs:
-  # Run the vagrant-up workflow with your Kubernetes configuration
   run-kubernetes-cluster:
-    uses: ./jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml
+    uses: jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml@main
+    # If you need to pass inputs to the workflow, you can use 'with:'
+    # with:
+    #   parameter1: value1
