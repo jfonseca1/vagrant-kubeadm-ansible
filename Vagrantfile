@@ -1,10 +1,13 @@
-IMAGE_NAME = "bento/ubuntu-16.04"
+IMAGE_NAME = "parallels/ubuntu-20.04"  # Updated to Parallels box
 N = 2
 
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
-    config.vm.provider :qemu do |v|
+    config.vm.box = IMAGE_NAME
+    
+    # Set Parallels as the provider
+    config.vm.provider "parallels" do |v|
         v.memory = 2048
         v.cpus = 2
     end
@@ -21,7 +24,7 @@ Vagrant.configure("2") do |config|
             }
         end
     end
-
+    
     (1..N).each do |i|
         config.vm.define "node-#{i}" do |node|
             node.vm.box = IMAGE_NAME
@@ -34,7 +37,7 @@ Vagrant.configure("2") do |config|
                     node_ip: "192.168.56.#{i + 10}",
                 }
                 # Add custom SSH args to use vagrant insecure key
-          	ansible.raw_ssh_args = ["-o IdentitiesOnly=yes", "-i ~/.vagrant.d/insecure_private_key"]
+                ansible.raw_ssh_args = ["-o IdentitiesOnly=yes", "-i ~/.vagrant.d/insecure_private_key"]
             end
         end
     end
