@@ -6,6 +6,7 @@ Vagrant.configure("2") do |config|
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
     config.vm.boot_timeout = 600
     config.vm.provision "shell", inline: "apt-get update && apt-get install -y python3 python3-pip"
+    config.vm.network "forwarded_port", guest: 22, host: 2201
     # Set Docker as the provider with base settings
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
@@ -13,7 +14,6 @@ Vagrant.configure("2") do |config|
         d.remains_running = true
         d.privileged = true  # Needed for systemd and many Kubernetes components
         d.create_args = ["--cap-add=NET_ADMIN", "--cap-add=SYS_ADMIN"]  # Required capabilities
-        d.ports = ["2222:22"]
     end
       
     config.vm.define "k8s-master" do |master|
