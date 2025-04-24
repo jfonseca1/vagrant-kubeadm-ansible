@@ -3,7 +3,16 @@ on: [push]
 
 jobs:
   run-kubernetes-cluster:
-    uses: jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml@main
-    # If you need to pass inputs to the workflow, you can use 'with:'
-    # with:
-    #   parameter1: value1
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Generate SSH key
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
+        chmod 600 ~/.ssh/id_rsa
+    
+    # Then continue with your workflow steps or call the external workflow
+    - name: Run Vagrant workflow
+      uses: jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml@main
