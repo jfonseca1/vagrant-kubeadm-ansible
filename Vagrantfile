@@ -4,7 +4,7 @@ N = 2
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
-    config.vm.provider "virtualbox" do |v|
+    config.vm.provider :qemu do |v|
         v.memory = 2048
         v.cpus = 2
     end
