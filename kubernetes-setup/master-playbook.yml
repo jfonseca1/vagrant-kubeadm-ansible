@@ -2,6 +2,10 @@
 - hosts: all
   become: true
   tasks:
+  - name: Install Python (if missing)
+      raw: command -v python3 || (apt update && apt install -y python3)
+      become: yes
+      changed_when: false
   - name: Install packages that allow apt to be used over HTTPS
     apt:
       name: "{{ packages }}"
