@@ -54,8 +54,8 @@ jobs:
       run: |
         vagrant plugin install vagrant-parallels
         vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 || true
-        vagrant up k8s-master
+        vagrant box add bento/ubuntu-16.04 --provider=parallels || true
+        vagrant up --provider=parallels k8s-master
 
     - name: Provision master node with Ansible
       run: |
@@ -80,8 +80,8 @@ jobs:
       run: |
         vagrant plugin install vagrant-parallels
         vagrant destroy -f || true
-        vagrant box add bento/ubuntu-16.04 || true
-        vagrant up node-1 node-2
+        vagrant box add bento/ubuntu-16.04 --provider=parallels || true
+        vagrant up --provider=parallels node-1 node-2
 
     - name: Provision worker nodes with Ansible
       run: |
