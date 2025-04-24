@@ -18,47 +18,30 @@ jobs:
           name: ssh-key
           path: ~/.ssh/id_rsa
 
-  # Job for provisioning the master node
   setup-master:
     runs-on: [self-hosted, macos]
     needs: prepare-environment
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-
-    - name: Install Docker and Vagrant dependencies
-      run: |
-        arch -arm64 brew install docker
-        arch -arm64 brew install vagrant
-        arch -arm64 brew install ansible
-
-    - name: Create Docker network
-      run: docker network create k8s-net || true
-
-    - name: Download SSH key artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: ssh-key
-        path: ~/.ssh/
-    
-    - name: Set permissions for SSH key
-      run: chmod 600 ~/.ssh/id_rsa
-    
-    - name: Set up Vagrant environment for master node
-      run: |
-        vagrant plugin install vagrant-docker-compose
-        vagrant destroy -f || true
-        vagrant up --provider=docker k8s-master
-        # Ensure Python is installed inside the VM before Ansible runs
-        vagrant ssh k8s-master -c "sudo apt update && sudo apt install -y python3"    
-
-    - name: Verify Docker containers
-      run: docker ps -a
-
-    - name: Provision master node with Ansible
-      run: |
-        vagrant ssh k8s-master -c "sudo ansible-playbook /vagrant/kubernetes-setup/master-playbook.yml"
-
+      - uses: actions/checkout@v4
+      - name: Install Docker and Vagrant
+        run: |
+          arch -arm64 brew install docker vagrant ansible
+      - name: Download SSH key
+        uses: actions/download-artifact@v4
+        with:
+          name: ssh-key
+          path: ~/.ssh/
+      - run: chmod 600 ~/.ssh/id_rsa
+      - name: Start Vagrant (with Python pre-install)
+        run: |
+          vagrant up --provider=docker k8s-master
+          vagrant ssh k8s-master -c "sudo apt update && sudo apt install -y python3"
+      - name: Run Ansible
+        run: |
+          vagrant ssh k8s-master -c "sudo ansible-playbook /vagrant/kubernetes-setup/master-playbook.yml"
+      - name: Verify Docker containers
+        run: docker ps -a
+  
   # Job for provisioning worker nodes
   setup-workers:
     runs-on: [self-hosted, macos]
