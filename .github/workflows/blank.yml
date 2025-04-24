@@ -1,102 +1,67 @@
 name: kubernetes-vagrant-cluster
-
 on: [push]
 
 jobs:
   prepare-environment:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set up WSL2 and Ubuntu
-      shell: powershell
-      run: |
-        Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart
-        Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart
-        wsl --set-default-version 2
-        Invoke-WebRequest -Uri https://aka.ms/wslubuntu2004 -OutFile Ubuntu.appx -UseBasicParsing
-        Add-AppxPackage -Path Ubuntu.appx
-        wsl -d Ubuntu-20.04 -e sh -c "echo 'WSL initialized'"
-
-    - name: Set up Vagrant and dependencies in WSL
-      shell: wsl-bash {0}
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y curl gnupg software-properties-common
-        
-        # Install HashiCorp GPG key
-        curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
-
-        # Add HashiCorp repo
-        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
-        sudo tee /etc/apt/sources.list.d/hashicorp.list
-
-        sudo apt-get update
-        sudo apt-get install -y vagrant
-
-        # Optional: install VirtualBox guest plugins if needed
-        vagrant plugin install vagrant-vbguest vagrant-reload
-
-    - name: Generate SSH key in WSL
-      shell: wsl-bash {0}
+    
+    - name: Generate SSH key
       run: |
         mkdir -p ~/.ssh
         ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
         chmod 600 ~/.ssh/id_rsa
-
+        
     - name: Upload SSH key as artifact
       uses: actions/upload-artifact@v4
       with:
         name: ssh-key
-        path: \\wsl$\Ubuntu-20.04\home\${{ github.actor }}\.ssh\id_rsa
-
+        path: ~/.ssh/id_rsa
+        
   run-vagrant:
     needs: prepare-environment
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-
+    
+    - name: Install VirtualBox and dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common wget
+        sudo add-apt-repository "deb [arch=amd64] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib"
+        wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
+        sudo apt-get update
+        sudo apt-get install -y virtualbox-7.0 dkms
+        sudo /sbin/vboxconfig
+        
+    - name: Install Vagrant
+      run: |
+        wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+        sudo apt update && sudo apt install -y vagrant
+        vagrant plugin install vagrant-vbguest
+        
     - name: Download SSH key artifact
       uses: actions/download-artifact@v4
       with:
         name: ssh-key
-        path: ${{ github.workspace }}\.ssh
-
-    - name: Copy SSH key to WSL
-      shell: powershell
+        path: ~/.ssh/
+    
+    - name: Set permissions for SSH key
+      run: chmod 600 ~/.ssh/id_rsa
+    - name: Check VirtualBox network status
       run: |
-        $wslHome = wsl -d Ubuntu-20.04 -e sh -c "echo `$HOME"
-        Copy-Item -Path "${{ github.workspace }}\.ssh\id_rsa" -Destination "\\wsl$\Ubuntu-20.04$wslHome\.ssh\id_rsa"
-
-    - name: Prepare WSL environment
-      shell: wsl-bash {0}
+        VBoxManage list hostonlyifs
+        VBoxManage list vms
+        VBoxManage list runningvms
+    - name: Run Vagrant
       run: |
-        sudo apt-get update
-        sudo apt-get install -y git curl
-        chmod 600 ~/.ssh/id_rsa
-        eval $(ssh-agent)
-        ssh-add ~/.ssh/id_rsa
-
-    - name: Run Vagrant in WSL2
-      shell: wsl-bash {0}
-      run: |
-        workspace_path=$(wslpath -a "$GITHUB_WORKSPACE")
-        cd "$workspace_path"
-
-        # Clean up existing VMs just in case
+        # Clean up any previous runs
         vagrant destroy -f || true
-
-        # Retry box download to prevent network flakiness
-        for i in {1..3}; do
-          vagrant box add bento/ubuntu-16.04 --provider virtualbox && break || sleep 10
-        done
-
-        VAGRANT_LOG=debug vagrant up || (vagrant destroy -f && exit 1)
-
-    - name: Cleanup on failure
-      if: failure()
-      shell: wsl-bash {0}
-      run: |
-        workspace_path=$(wslpath -a "$GITHUB_WORKSPACE")
-        cd "$workspace_path"
-        vagrant destroy -f
+        
+        # Add box with retry
+        vagrant box add bento/ubuntu-16.04 --provider virtualbox || true
+        
+        # Run with debug logging
+        VAGRANT_LOG=debug vagrant up --provider virtualbox || (vagrant destroy -f && exit 1)
