@@ -43,12 +43,14 @@ jobs:
     
     - name: Set permissions for SSH key
       run: chmod 600 ~/.ssh/id_rsa
-        
+    
     - name: Set up Vagrant environment for master node
       run: |
         vagrant plugin install vagrant-docker-compose
         vagrant destroy -f || true
         vagrant up --provider=docker k8s-master
+        # Ensure Python is installed inside the VM before Ansible runs
+        vagrant ssh k8s-master -c "sudo apt update && sudo apt install -y python3"    
 
     - name: Verify Docker containers
       run: docker ps -a
@@ -88,6 +90,9 @@ jobs:
         vagrant plugin install vagrant-docker-compose
         # Note: We don't destroy existing containers here to preserve the master
         vagrant up --provider=docker node-1 node-2
+        vagrant ssh node-1 -c "sudo apt update && sudo apt install -y python3"    
+        vagrant ssh node-2 -c "sudo apt update && sudo apt install -y python3"    
+
 
     - name: Verify Docker containers
       run: docker ps -a
