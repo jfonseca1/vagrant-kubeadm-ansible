@@ -4,4 +4,4 @@ on: [push]
 jobs:
   # Run the vagrant-up workflow with your Kubernetes configuration
   run-kubernetes-cluster:
-    uses: ./.github/workflows/vagrant-up.yml
+    uses: ./jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml
