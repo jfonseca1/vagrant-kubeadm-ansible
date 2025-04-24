@@ -2,7 +2,8 @@ name: kubernetes-vagrant-cluster
 on: [push]
 
 jobs:
-  run-kubernetes-cluster:
+  # First generate the SSH key
+  prepare-environment:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -12,7 +13,14 @@ jobs:
         mkdir -p ~/.ssh
         ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
         chmod 600 ~/.ssh/id_rsa
-    
-    # Then continue with your workflow steps or call the external workflow
-    - name: Run Vagrant workflow
-      uses: jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml@main
+        
+    - name: Upload SSH key as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ssh-key
+        path: ~/.ssh/id_rsa
+        
+  # Then run the external workflow
+  run-vagrant:
+    needs: prepare-environment
+    uses: jfonseca1/vagrant-github-actions/.github/workflows/vagrant-up.yml@main
