@@ -1,4 +1,4 @@
-IMAGE_NAME = "ubuntu-16.04" 
+IMAGE_NAME = "tknerr/baseimage-ubuntu" 
 N = 2
 
 Vagrant.configure("2") do |config|
