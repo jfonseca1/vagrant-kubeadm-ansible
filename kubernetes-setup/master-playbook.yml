@@ -1,18 +1,16 @@
----
 - name: Configure Kubernetes master
   hosts: localhost
   become: true
   tasks:
-    # 1. Disable swap permanently
-    - name: Disable swap immediately
+    # 1. Disable swap
+    - name: Disable swap
       shell: |
         swapoff -a
-        sed -i '/ swap / s/^/#/' /etc/fstab
+        [ -f /etc/fstab ] && sed -i '/ swap / s/^/#/' /etc/fstab
       args:
         warn: false
 
-    
-    # 2. Install and configure containerd
+    # 2. Install containerd without systemd
     - name: Install containerd
       apt:
         name: containerd
@@ -31,25 +29,18 @@
         creates: /etc/containerd/config.toml
 
     - name: Configure containerd
-      copy:
-        dest: /etc/containerd/config.toml
-        content: |
-          version = 2
-          [plugins]
-            [plugins."io.containerd.grpc.v1.cri"]
-              sandbox_image = "registry.k8s.io/pause:3.8"
-              [plugins."io.containerd.grpc.v1.cri".containerd]
-                snapshotter = "overlayfs"
-                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
-                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-                    runtime_type = "io.containerd.runc.v2"
-      notify: restart containerd
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'sandbox_image = .*'
+        replace: 'sandbox_image = "registry.k8s.io/pause:3.8"'
 
-    - name: Ensure containerd is running
-      systemd:
-        name: containerd
-        state: started
-        enabled: yes
+    - name: Start containerd
+      shell: |
+        mkdir -p /run/containerd
+        containerd >/var/log/containerd.log 2>&1 &
+        sleep 3  # Give containerd time to start
+      args:
+        warn: false
 
     # 3. Kernel modules and sysctl
     - name: Load kernel modules
