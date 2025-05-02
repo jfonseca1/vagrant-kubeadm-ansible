@@ -11,7 +11,7 @@ Vagrant.configure("2") do |config|
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
         d.has_ssh = true
-        d.remains_running = true
+        d.remains_running = false
         d.privileged = true  # Needed for systemd and many Kubernetes components
         d.create_args = ["--cap-add=NET_ADMIN", "--cap-add=SYS_ADMIN"]  # Required capabilities
     end
