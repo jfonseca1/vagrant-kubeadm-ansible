@@ -1,8 +1,65 @@
-- name: Install Kubernetes components on master
+---
+- name: Configure Kubernetes master
   hosts: localhost
   become: true
   tasks:
-    - name: Install required packages
+    # 1. Disable swap permanently
+    - name: Disable swap immediately
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^/#/' /etc/fstab
+      args:
+        warn: false
+
+    # 2. Install and configure containerd
+    - name: Install containerd
+      apt:
+        name: containerd
+        state: present
+        update_cache: yes
+
+    - name: Configure containerd
+      copy:
+        dest: /etc/containerd/config.toml
+        content: |
+          version = 2
+          [plugins]
+            [plugins."io.containerd.grpc.v1.cri"]
+              sandbox_image = "registry.k8s.io/pause:3.8"
+              [plugins."io.containerd.grpc.v1.cri".containerd]
+                snapshotter = "overlayfs"
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                    runtime_type = "io.containerd.runc.v2"
+      notify: restart containerd
+
+    - name: Ensure containerd is running
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+
+    # 3. Kernel modules and sysctl
+    - name: Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - br_netfilter
+        - overlay
+
+    - name: Configure sysctl
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      with_items:
+        - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+
+    # 4. Install Kubernetes components
+    - name: Install prerequisites
       apt:
         name:
           - apt-transport-https
@@ -13,66 +70,44 @@
         state: present
         update_cache: yes
 
-    - name: Create keyrings directory
-      file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: 0755
-
-    - name: Add Kubernetes GPG key (updated method)
-      shell: |
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-      args:
-        warn: false
+    - name: Add Kubernetes GPG key
+      apt_key:
+        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        state: present
 
     - name: Add Kubernetes repository
       apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
         state: present
         filename: kubernetes
-        mode: 0644
-  
-    - name: Install kubeadm, kubectl and kubelet
+
+    - name: Install Kubernetes packages
       apt:
         name:
-          - kubelet=1.28.0-1.1
-          - kubeadm=1.28.0-1.1
-          - kubectl=1.28.0-1.1
+          - kubelet=1.28.15-1.1
+          - kubeadm=1.28.15-1.1
+          - kubectl=1.28.15-1.1
         state: present
-        
-    - name: Hold kubeadm, kubelet and kubectl versions
+        update_cache: yes
+
+    - name: Hold Kubernetes packages
       command: apt-mark hold kubelet kubeadm kubectl
 
+    # 5. Initialize cluster with retries
     - name: Initialize Kubernetes cluster
-      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      shell: |
+        kubeadm init \
+          --pod-network-cidr=10.244.0.0/16 \
+          --ignore-preflight-errors=Swap \
+          --cri-socket=unix:///run/containerd/containerd.sock
       register: kubeadm_init
-      ignore_errors: yes
+      retries: 3
+      delay: 10
+      until: kubeadm_init.rc == 0
+      changed_when: false
 
-    - name: Set up kubeconfig for regular user
-      block:
-        - name: Create .kube directory
-          file:
-            path: /home/vagrant/.kube
-            state: directory
-            owner: vagrant
-            group: vagrant
-
-        - name: Copy admin.conf to user's kubeconfig
-          copy:
-            src: /etc/kubernetes/admin.conf
-            dest: /home/vagrant/.kube/config
-            remote_src: yes
-            owner: vagrant
-            group: vagrant
-
-        - name: Change ownership of .kube/config
-          file:
-            path: /home/vagrant/.kube/config
-            owner: vagrant
-            group: vagrant
-            mode: '0600'
-      when: kubeadm_init.rc == 0
-
-    - name: Install network plugin (Flannel)
-      command: sudo -u vagrant kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-      when: kubeadm_init.rc == 0
+  handlers:
+    - name: restart containerd
+      systemd:
+        name: containerd
+        state: restarted
