@@ -13,16 +13,18 @@
         state: present
         update_cache: yes
 
-    - name: Add Kubernetes GPG key
-      apt_key:
-        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
-        state: present
+    - name: Add Kubernetes GPG key (new method)
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        warn: false
 
-    - name: Add Kubernetes repository
+    - name: Add Kubernetes repository (updated URL)
       apt_repository:
-        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
         state: present
         filename: kubernetes
+        mode: 0644
 
     - name: Install kubeadm, kubelet and kubectl
       apt:
