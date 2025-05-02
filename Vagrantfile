@@ -1,20 +1,19 @@
-IMAGE_NAME = "ubuntu:focal"
+IMAGE_NAME = "rastasheep/ubuntu-sshd:18.04"
 N = 2
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
     config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
     config.vm.boot_timeout = 600
-    config.vm.provision "shell", inline: "apt-get update && apt-get install -y python3 python3-pip ansible openssh-server"
+    config.vm.provision "shell", inline: "apt-get update && apt-get install -y python3 python3-pip ansible"
     config.vm.network :forwarded_port, guest: 22, host: 2222, auto_correct: true
-    # Set Docker as the provider with base settings
+    
+    # Use docker provider with an image that already has SSH installed
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
         d.has_ssh = true
         d.remains_running = true
         d.privileged = true  # Needed for systemd and many Kubernetes components
         d.create_args = ["--cap-add=NET_ADMIN", "--cap-add=SYS_ADMIN"]  # Required capabilities
-        # Important: Add a command that keeps the container running
-        d.cmd = ["/usr/sbin/sshd", "-D"]
     end
       
     config.vm.define "k8s-master" do |master|
