@@ -24,19 +24,10 @@
     apt_repository:
       repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu xenial stable
       state: present
-
-  - name: Install docker and its dependecies
-    apt: 
-      name: "{{ packages }}"
+  - name: install docker
+    package:
+      name: docker-ce
       state: present
-      update_cache: yes
-    vars:
-      packages:
-      - docker-ce 
-      - docker-ce-cli 
-      #- containerd.io=1.6.*
-    notify:
-      - docker status
   - name: Download containerd
     get_url:
       url: "https://github.com/containerd/containerd/releases/download/v1.7.14/containerd-1.7.14-linux-amd64.tar.gz"
