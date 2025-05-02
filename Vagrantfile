@@ -1,4 +1,4 @@
-IMAGE_NAME = "ubuntu/focal64" 
+IMAGE_NAME = "ubuntu:focal" 
 N = 2
 
 Vagrant.configure("2") do |config|
