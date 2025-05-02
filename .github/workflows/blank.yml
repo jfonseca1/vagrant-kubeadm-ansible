@@ -78,16 +78,19 @@ jobs:
     - name: Verify Docker containers
       run: docker ps -a  
     
-    - name: Get join command from master
-      id: get-join-command
+    - name: Join worker nodes (direct method)
       run: |
-        JOIN_COMMAND=$(vagrant ssh k8s-master -c "sudo kubeadm token create --print-join-command" | tr -d '\r')
-        echo "JOIN_COMMAND=${JOIN_COMMAND}" >> $GITHUB_ENV
-
-    - name: Join worker nodes
-      run: |
-        vagrant ssh node-1 -c "sudo ${{ env.JOIN_COMMAND }}"
-        vagrant ssh node-2 -c "sudo ${{ env.JOIN_COMMAND }}"
+        # Get join command directly and execute immediately
+        JOIN_CMD=$(vagrant ssh k8s-master -c "sudo kubeadm token create --print-join-command 2>/dev/null" | tr -d '\r')
+        
+        if [[ -z "$JOIN_CMD" ]]; then
+          echo "::error::Failed to get join command"
+          exit 1
+        fi
+        
+        # Join nodes
+        vagrant ssh node-1 -c "sudo $JOIN_CMD"
+        vagrant ssh node-2 -c "sudo $JOIN_CMD"
 
     - name: Verify cluster status
       run: |
