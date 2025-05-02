@@ -1,3 +1,75 @@
+---
+- name: Configure Kubernetes worker node
+  hosts: localhost
+  become: true
+  tasks:
+    # 1. Disable swap
+    - name: Disable swap immediately
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^/#/' /etc/fstab
+      args:
+        warn: false
+
+    # 2. Install and configure containerd (updated with directory creation)
+    - name: Install containerd
+      apt:
+        name: containerd
+        state: present
+        update_cache: yes
+
+    - name: Create containerd config directory
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: 0755
+
+    - name: Generate default containerd config
+      command: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Configure containerd (update existing config)
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*\[plugins."io\.containerd\.grpc\.v1\.cri"\]'
+        line: |
+          [plugins."io.containerd.grpc.v1.cri"]
+            sandbox_image = "registry.k8s.io/pause:3.8"
+            [plugins."io.containerd.grpc.v1.cri".containerd]
+              snapshotter = "overlayfs"
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                  runtime_type = "io.containerd.runc.v2"
+      notify: restart containerd
+
+    - name: Ensure containerd is running
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+
+    # Rest of your worker tasks remain the same...
+    - name: Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - br_netfilter
+        - overlay
+
+    - name: Configure sysctl
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      with_items:
+        - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+
+    # ... (rest of your playbook)
+
 - name: Install Kubernetes components on worker
   hosts: localhost
   become: true
@@ -42,3 +114,9 @@
 
     - name: Hold kubeadm, kubelet and kubectl versions
       command: apt-mark hold kubelet kubeadm kubectl
+
+handlers:
+    - name: restart containerd
+      systemd:
+        name: containerd
+        state: restarted
