@@ -144,6 +144,7 @@
       service:
         name: kubelet
         enabled: yes
+      when: kube_install is success
 
     - name: Load br_netfilter kernel module
       modprobe:
