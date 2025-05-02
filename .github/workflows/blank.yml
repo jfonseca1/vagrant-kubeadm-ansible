@@ -19,7 +19,7 @@ jobs:
           path: ~/.ssh/id_rsa
 
   setup-master:
-    runs-on: [self-hosted, macos]
+    runs-on: ubuntu-latest
     needs: prepare-environment
     container:
       image: ubuntu:22.04
