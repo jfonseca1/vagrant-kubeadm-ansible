@@ -127,6 +127,7 @@
         state: restarted
         enabled: yes
         daemon-reload: yes
+      when: ansible_service_mgr == 'systemd'
 
     - name: Install Kubelet
       apt:
