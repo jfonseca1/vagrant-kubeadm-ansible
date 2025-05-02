@@ -35,11 +35,10 @@
     - name: Install kubeadm, kubelet and kubectl
       apt:
         name:
-          - kubelet=1.28.0-00
-          - kubeadm=1.28.0-00
-          - kubectl=1.28.0-00
+          - kubelet=1.28.0-1.1
+          - kubeadm=1.28.0-1.1
+          - kubectl=1.28.0-1.1
         state: present
-        allow_downgrade: yes
 
     - name: Hold kubeadm, kubelet and kubectl versions
       command: apt-mark hold kubelet kubeadm kubectl
