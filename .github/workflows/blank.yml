@@ -84,16 +84,9 @@ jobs:
         vagrant up --provider=docker node-1 node-2
         vagrant ssh node-1 -c "sudo apt update && sudo apt install -y python3"    
         vagrant ssh node-2 -c "sudo apt update && sudo apt install -y python3"    
-
-
+        
     - name: Verify Docker containers
-      run: docker ps -a
-
-    - name: Provision worker nodes with Ansible
-      run: |
-        vagrant ssh node-1 -c "sudo ansible-playbook /vagrant/kubernetes-setup/node-playbook.yml"
-        vagrant ssh node-2 -c "sudo ansible-playbook /vagrant/kubernetes-setup/node-playbook.yml"
-    
+      run: docker ps -a  
     - name: Join workers to cluster
       run: |
         JOIN_COMMAND=$(echo "${{ env.JOIN_COMMAND }}" | tr -d '\r')
