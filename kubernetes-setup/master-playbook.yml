@@ -11,12 +11,24 @@
       args:
         warn: false
 
+    
     # 2. Install and configure containerd
     - name: Install containerd
       apt:
         name: containerd
         state: present
         update_cache: yes
+
+    - name: Create containerd config directory
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: 0755
+
+    - name: Generate default containerd config
+      command: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
 
     - name: Configure containerd
       copy:
