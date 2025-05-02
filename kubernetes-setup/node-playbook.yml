@@ -1,175 +1,155 @@
----
-- hosts: all
-  become: true
+- name: Kubernetes Dependencies
+  hosts: all
+  become: yes
   tasks:
-  - name: Install packages that allow apt to be used over HTTPS
-    apt:
-      name: "{{ packages }}"
-      state: present
-      update_cache: yes
-    vars:
-      packages:
-      - apt-transport-https
-      - ca-certificates
-      - curl
-      - gnupg-agent
-      - software-properties-common
+    - name: Updates
+      apt:
+        update_cache: yes
 
-  - name: Add an apt signing key for Docker
-    apt_key:
-      url: https://download.docker.com/linux/ubuntu/gpg
-      state: present
+    - name: Reboot
+      reboot:
 
-  - name: Add apt repository for stable version
-    apt_repository:
-      repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu xenial stable
-      state: present
+    - name: Disable SWAP
+      shell: |
+        swapoff -a
 
-  - name: Install docker and its dependecies
-    apt: 
-      name: "{{ packages }}"
-      state: present
-      update_cache: yes
-    vars:
-      packages:
-      - docker-ce 
-      - docker-ce-cli 
-      #- containerd.io=1.6.*
-    notify:
-      - docker status
-  - name: Download containerd
-    get_url:
-      url: "https://github.com/containerd/containerd/releases/download/v1.7.14/containerd-1.7.14-linux-amd64.tar.gz"
-      dest: "/tmp/containerd.tar.gz"
+    - name: Disable SWAP in fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+        replace: '# \1'
 
-  - name: Extract containerd
-    unarchive:
-      src: "/tmp/containerd.tar.gz"
-      dest: "/usr/local"
-      remote_src: yes
+    - name: Create an empty file for the containerd module
+      copy:
+        content: ""
+        dest: /etc/modules-load.d/containerd.conf
+        force: no
 
-  - name: Create containerd config directory
-    file:
-      path: /etc/containerd
-      state: directory
+    - name: Configure modules for containerd
+      blockinfile:
+        path: /etc/modules-load.d/containerd.conf
+        block: |
+          overlay
+          br_netfilter
 
-  - name: Generate default containerd config
-    command: containerd config default > /etc/containerd/config.toml
-    
-  - name: Create containerd service file
-    copy:
-      dest: /etc/systemd/system/containerd.service
-      content: |
-        [Unit]
-        Description=containerd container runtime
-        Documentation=https://containerd.io
-        After=network.target local-fs.target
+    - name: Create an empty file for K8S sysctl parameters
+      copy:
+        content: ""
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+        force: no
 
-        [Service]
-        ExecStartPre=-/sbin/modprobe overlay
-        ExecStart=/usr/local/bin/containerd
+    - name: Configure sysctl parameters for K8S
+      lineinfile:
+        path: /etc/sysctl.d/99-kubernetes-cri.conf
+        line: "{{ item }}"
+      with_items:
+        - "net.bridge.bridge-nf-call-iptables  = 1"
+        - "net.ipv4.ip_forward                 = 1"
+        - "net.bridge.bridge-nf-call-ip6tables = 1"
 
-        Type=notify
-        Delegate=yes
-        KillMode=process
-        Restart=always
-        RestartSec=5
+    - name: Apply sysctl parameters
+      command: sysctl --system
 
-        [Install]
-        WantedBy=multi-user.target
+    - name: Install APT Transport HTTPS
+      apt:
+        name: apt-transport-https
+        state: present
 
-  - name: Start and enable containerd service
-    systemd:
-      name: containerd
-      state: started
-      enabled: yes
-      daemon_reload: yes
-    
+    - name: Add Docker apt-key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker-apt-keyring.asc
+        mode: "0644"
+        force: true
 
-  - name: Add vagrant user to docker group
-    user:
-      name: vagrant
-      group: docker
+    - name: Add Docker's APT repo
+      apt_repository:
+        repo: "deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }} signed-by=/etc/apt/keyrings/docker-apt-keyring.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: yes
 
-  - name: Remove swapfile from /etc/fstab
-    mount:
-        name: "{{ item }}"
-        fstype: swap
-        state: absent
-    with_items:
-    - swap
-    - none
+    - name: Add Kubernetes apt-key
+      get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+        mode: "0644"
+        force: true
 
-  - name: Disable swap
-    command: swapoff -a
-    when: ansible_swaptotal_mb > 0
-  
-  - name: Add Kubernetes GPG apt key
-    apt_key:
-      url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
-      state: present
+    - name: Add Kubernetes APT repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+        state: present
+        update_cache: yes
 
-  - name: Add Kubernetes apt repository
-    apt_repository:
-      repo: deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /
-      state: present
-      filename: kubernetes.list  
+    - name: Install containerd
+      apt:
+        name: containerd.io
+        state: present
 
-  - name: Install Kubernetes binaries
-    apt: 
-      name: "{{ packages }}"
-      state: present
-      update_cache: yes          
-      allow_unauthenticated: yes
-    vars:
-      packages:
-        - kubelet
-        - kubeadm
-        - kubectl
+    - name: Create containerd directory
+      file:
+        path: /etc/containerd
+        state: directory
 
-  - name: Configure node ip
-    lineinfile:
-      path: /etc/default/kubelet
-      line: KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+    - name: Add containerd configuration
+      shell: /usr/bin/containerd config default > /etc/containerd/config.toml
 
-  - name: Restart kubelet
-    service:
-      name: kubelet
-      daemon_reload: yes
-      state: restarted
-  
-  - name: Restart containerd
-    systemd:
-      name: containerd
-      state: restarted
+    - name: Configuring Systemd cgroup driver for containerd
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: "            SystemdCgroup = false"
+        line: "            SystemdCgroup = true"
 
-  - name: Remove containerd config
-    file:
-      path: /etc/containerd/config.toml
-      state: absent
+    - name: Enable the containerd service and start service
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+        daemon-reload: yes
 
-  - name: Restart containerd again
-    systemd:
-      name: containerd
-      state: restarted
+    - name: Install Kubelet
+      apt:
+        name: kubelet=1.29.*
+        state: present
+        update_cache: true
 
-  - name: Install required packages
-    apt:
-      name:
-        - ebtables
-        - socat
-      state: present
+    - name: Install Kubeadm
+      apt:
+        name: kubeadm=1.29.*
+        state: present
 
+    - name: Enable the Kubelet service
+      service:
+        name: kubelet
+        enabled: yes
 
-  - name: Copy the join command to server location
-    copy: 
-      src: join-command 
-      dest: /tmp/join-command.sh 
-      mode: '0755'
+    - name: Load br_netfilter kernel module
+      modprobe:
+        name: br_netfilter
+        state: present
 
-  - name: Join the node to cluster
-    command: sh /tmp/join-command.sh
+    - name: Set bridge-nf-call-iptables
+      sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: 1
 
-  handlers:
-    - name: docker status
-      service: name=docker state=started
+    - name: Set ip_forward
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: 1
+
+    - name: Reboot
+      reboot:
+
+- name: Join Worker Nodes
+  hosts: workers
+  become: yes
+  tasks:
+    - name: Enable TCP port 6443 (On Master) is able to connect from Worker
+      wait_for: "host=YOUR_MASTER_IP port=6443 timeout=1"
+
+    - name: Join worker to cluster
+      shell: "{{ hostvars['YOUR_MASTER_IP'].join_command }} >> node_joined.log"
+      args:
+        chdir: /home/YOUR_USERPROFILE_NAME
+        creates: node_joined.log
