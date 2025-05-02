@@ -1,13 +1,14 @@
-IMAGE_NAME = "rastasheep/ubuntu-sshd:18.04"
+IMAGE_NAME = "tknerr/baseimage-ubuntu:18.04"
 N = 2
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
-    config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
+    config.ssh.username = "vagrant"
+    config.ssh.password = "vagrant"
     config.vm.boot_timeout = 600
     config.vm.provision "shell", inline: "apt-get update && apt-get install -y python3 python3-pip ansible"
     config.vm.network :forwarded_port, guest: 22, host: 2222, auto_correct: true
     
-    # Use docker provider with an image that already has SSH installed
+    # Use docker provider with an image specifically built for Vagrant
     config.vm.provider "docker" do |d|
         d.image = IMAGE_NAME
         d.has_ssh = true
