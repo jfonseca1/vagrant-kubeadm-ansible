@@ -22,7 +22,11 @@ Vagrant.configure("2") do |config|
     d.has_ssh = true
     d.remains_running = true
     d.privileged = true
-    d.create_args = ["--cap-add=NET_ADMIN", "--cap-add=SYS_ADMIN"]
+    d.create_args = [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=SYS_ADMIN",
+    "--volume=/sys/fs/cgroup:/sys/fs/cgroup:rw" # Important for cgroups
+  ]
   end
 
   # Master node configuration
