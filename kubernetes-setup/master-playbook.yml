@@ -8,10 +8,17 @@
 
     #- name: Reboot
     #  reboot: {}
-
-    - name: Disable SWAP
+    - name: Disable SWAP if active
       shell: |
-        swapoff -a
+        if swapon --summary | grep -q '^'; then
+          swapoff -a
+        fi
+      become: yes
+      ignore_errors: yes
+
+    #- name: Disable SWAP
+    #  shell: |
+    #    swapoff -a
 
     - name: Disable SWAP in fstab
       replace:
