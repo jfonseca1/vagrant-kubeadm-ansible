@@ -78,21 +78,37 @@ jobs:
     - name: Verify Docker containers
       run: docker ps -a  
     
-    - name: Join worker nodes (direct method)
+    - name: Get join command and join workers
       run: |
-        # Get join command directly and execute immediately
-        JOIN_CMD=$(vagrant ssh k8s-master -c "sudo kubeadm token create --print-join-command 2>/dev/null" | tr -d '\r')
+        # Wait for master to be fully ready (important!)
+        sleep 30
+        
+        # Get join command with retries
+        for i in {1..5}; do
+          JOIN_CMD=$(vagrant ssh k8s-master -c "sudo kubeadm token create --print-join-command 2>/dev/null" | tr -d '\r')
+          if [[ -n "$JOIN_CMD" ]]; then
+            break
+          fi
+          echo "Attempt $i: Waiting for master to be ready..."
+          sleep 10
+        done
         
         if [[ -z "$JOIN_CMD" ]]; then
-          echo "::error::Failed to get join command"
+          echo "::error::Failed to get join command after 5 attempts"
+          vagrant ssh k8s-master -c "sudo kubectl get pods -A"
           exit 1
         fi
         
-        # Join nodes
-        vagrant ssh node-1 -c "sudo $JOIN_CMD"
-        vagrant ssh node-2 -c "sudo $JOIN_CMD"
-
+        echo "Join command: $JOIN_CMD"
+        
+        # Join worker nodes
+        for node in node-1 node-2; do
+          echo "Joining $node to cluster..."
+          vagrant ssh $node -c "sudo $JOIN_CMD"
+          sleep 5
+        done
+          
     - name: Verify cluster status
       run: |
         vagrant ssh k8s-master -c "sudo kubectl get nodes"
- 
+        vagrant ssh k8s-master -c "sudo kubectl get pods -A"
