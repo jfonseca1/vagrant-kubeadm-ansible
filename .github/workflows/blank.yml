@@ -21,6 +21,9 @@ jobs:
   setup-master:
     runs-on: [self-hosted, macos]
     needs: prepare-environment
+    container:
+      image: ubuntu:22.04
+      options: --privileged --cap-add=ALL
     steps:
       - uses: actions/checkout@v4
       - name: Install Docker and Vagrant
