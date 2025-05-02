@@ -7,7 +7,7 @@
         update_cache: yes
 
     - name: Reboot
-      reboot:
+      reboot: {}
 
     - name: Disable SWAP
       shell: |
@@ -139,7 +139,7 @@
         value: 1
 
     - name: Reboot
-      reboot:
+      reboot: {}
 
 - hosts: master
   become: yes
