@@ -1,277 +1,71 @@
-
-- name: Kubernetes Dependencies
-  hosts: all
-  become: yes
+- name: Install Kubernetes components on master
+  hosts: localhost
+  become: true
   tasks:
-    - name: Updates
+    - name: Install required packages
       apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - software-properties-common
+        state: present
         update_cache: yes
-    - name: Ensure kernel tools are installed
-      become: yes
-      block:
-        - name: Install kmod package
-          apt:
-            name: kmod
-            state: present
-          when: ansible_os_family == 'Debian'
-    
-        - name: Install kernel headers
-          apt:
-            name: "linux-modules-extra-{{ ansible_kernel }}"
-            state: present
-          when: ansible_os_family == 'Debian'
 
-    #- name: Reboot
-    #  reboot: {}
-    - name: Disable SWAP if active
-      shell: |
-        if swapon --summary | grep -q '^'; then
-          swapoff -a
-        fi
-      become: yes
+    - name: Add Kubernetes GPG key
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+        filename: kubernetes
+
+    - name: Install kubeadm, kubectl and kubelet
+      apt:
+        name:
+          - kubelet=1.28.0-00
+          - kubeadm=1.28.0-00
+          - kubectl=1.28.0-00
+        state: present
+        allow_downgrade: yes
+
+    - name: Hold kubeadm, kubelet and kubectl versions
+      command: apt-mark hold kubelet kubeadm kubectl
+
+    - name: Initialize Kubernetes cluster
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      register: kubeadm_init
       ignore_errors: yes
 
-    #- name: Disable SWAP
-    #  shell: |
-    #    swapoff -a
-
-    - name: Disable SWAP in fstab
-      replace:
-        path: /etc/fstab
-        regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
-        replace: '# \1'
-
-    - name: Create an empty file for the containerd module
-      copy:
-        content: ""
-        dest: /etc/modules-load.d/containerd.conf
-        force: no
-
-    - name: Configure modules for containerd
-      blockinfile:
-        path: /etc/modules-load.d/containerd.conf
-        block: |
-          overlay
-          br_netfilter
-
-    - name: Create an empty file for K8S sysctl parameters
-      copy:
-        content: ""
-        dest: /etc/sysctl.d/99-kubernetes-cri.conf
-        force: no
-
-    - name: Configure sysctl parameters for K8S
-      lineinfile:
-        path: /etc/sysctl.d/99-kubernetes-cri.conf
-        line: "{{ item }}"
-      with_items:
-        - "net.bridge.bridge-nf-call-iptables  = 1"
-        - "net.ipv4.ip_forward                 = 1"
-        - "net.bridge.bridge-nf-call-ip6tables = 1"
-
-    - name: Apply sysctl parameters
-      command: sysctl --system
-
-    - name: Install APT Transport HTTPS
-      apt:
-        name: apt-transport-https
-        state: present
-
-    - name: Ensure /etc/apt/keyrings exists
-      file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: '0755'
-
-
-    
-    - name: Add Docker apt-key
-      get_url:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        dest: /etc/apt/keyrings/docker-apt-keyring.asc
-        mode: "0644"
-        force: true
-
-    - name: Add Docker's APT repo
-      apt_repository:
-        repo: "deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }} signed-by=/etc/apt/keyrings/docker-apt-keyring.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-        state: present
-        update_cache: yes
-    
-    - name: Add Kubernetes apt-key
-      get_url:
-        url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
-        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
-        mode: "0644"
-        force: true
-  
-    - name: Add Kubernetes GPG key
-      get_url:
-        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
-        dest: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
-        mode: '0644'
-        
-    - name: Add Kubernetes APT repository
-      apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
-        state: present
-        update_cache: yes
-
-    - name: Install containerd
-      apt:
-        name: containerd.io
-        state: present
-
-    - name: Create containerd directory
-      file:
-        path: /etc/containerd
-        state: directory
-
-    - name: Add containerd configuration
-      shell: /usr/bin/containerd config default > /etc/containerd/config.toml
-
-    - name: Configuring Systemd cgroup driver for containerd
-      lineinfile:
-        path: /etc/containerd/config.toml
-        regexp: "            SystemdCgroup = false"
-        line: "            SystemdCgroup = true"
-
-    - name: Enable the containerd service and start service
-      systemd:
-        name: containerd
-        state: restarted
-        enabled: yes
-        daemon-reload: yes
-      when: ansible_service_mgr == 'systemd'
-
-    - name: Install Kubelet
-      apt:
-        name: kubelet=1.29.*
-        state: present
-        update_cache: true
-
-    - name: Install Kubeadm
-      apt:
-        name: kubeadm=1.29.*
-        state: present
-
-    - name: Enable the Kubelet service
-      service:
-        name: kubelet
-        enabled: yes
-      when: ansible_service_mgr == 'systemd'
-
-    - name: Load br_netfilter kernel module
-      become: yes
+    - name: Set up kubeconfig for regular user
       block:
-        - name: Check if module is already loaded
-          command: lsmod | grep br_netfilter
-          register: module_check
-          ignore_errors: yes
-          changed_when: false
-    
-        - name: Load module if needed
-          command: modprobe br_netfilter
-          when: module_check.rc != 0
-          
-        - name: Ensure persistent loading
+        - name: Create .kube directory
+          file:
+            path: /home/vagrant/.kube
+            state: directory
+            owner: vagrant
+            group: vagrant
+
+        - name: Copy admin.conf to user's kubeconfig
           copy:
-            dest: /etc/modules-load.d/k8s.conf
-            content: |
-              br_netfilter
-              overlay
-      when: ansible_kernel != 'container'  # Skip if in container
-    
-    - name: Set bridge-nf-call-iptables
-      sysctl:
-        name: net.bridge.bridge-nf-call-iptables
-        value: 1
+            src: /etc/kubernetes/admin.conf
+            dest: /home/vagrant/.kube/config
+            remote_src: yes
+            owner: vagrant
+            group: vagrant
 
-    - name: Set ip_forward
-      sysctl:
-        name: net.ipv4.ip_forward
-        value: 1
+        - name: Change ownership of .kube/config
+          file:
+            path: /home/vagrant/.kube/config
+            owner: vagrant
+            group: vagrant
+            mode: '0600'
+      when: kubeadm_init.rc == 0
 
-    #- name: Reboot
-    #  reboot: {}
-
-- hosts: master
-  become: yes
-  tasks:
-    - name: Install Kubectl
-      apt:
-        name: kubectl=1.29.*
-        state: present
-        force: yes
-
-- hosts: master
-  become: yes
-  tasks:
-    - name: Create an Empty file for Kubeadm configuring
-      copy:
-        content: ""
-        dest: /etc/kubernetes/kubeadm-config.yaml
-        force: no
-
-    - name: Configure container runtime
-      blockinfile:
-        path: /etc/kubernetes/kubeadm-config.yaml
-        block: |
-          kind: ClusterConfiguration
-          apiVersion: kubeadm.k8s.io/v1beta3
-          networking:
-            podSubnet: "10.244.0.0/16"
-          ---
-          kind: KubeletConfiguration
-          apiVersion: kubelet.config.k8s.io/v1beta1
-          runtimeRequestTimeout: "15m"
-          cgroupDriver: "systemd"
-          systemReserved:
-            cpu: 100m
-            memory: 350M
-          kubeReserved:
-            cpu: 100m
-            memory: 50M
-          enforceNodeAllocatable:
-          - pods
-
-    - name: Initialize the cluster
-      shell: kubeadm init --config /etc/kubernetes/kubeadm-config.yaml >> cluster_initialized.log
-      args:
-        chdir: /home/YOUR_USERPROFILE_NAME
-        creates: cluster_initialized.log
-
-    - name: Create .kube directory
-      become: yes
-      become_user: YOUR_USERPROFILE_NAME
-      file:
-        path: $HOME/.kube
-        state: directory
-        mode: 0755
-
-    - name: Copy admin.conf to User's kube config
-      copy:
-        src: /etc/kubernetes/admin.conf
-        dest: /home/YOUR_USERPROFILE_NAME/.kube/config
-        remote_src: yes
-        owner: YOUR_USERPROFILE_NAME
-
-    - name: Install Pod Network
-      become: yes
-      become_user: YOUR_USERPROFILE_NAME
-      shell: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml >> pod_network_setup.log
-      args:
-        chdir: $HOME
-        creates: pod_network_setup.log
-
-- name: Configure Join Commands on Master Node
-  hosts: master
-  become: yes
-  tasks:
-    - name: Retrieve Join Command
-      shell: kubeadm token create --print-join-command
-      register: join_command_raw
-
-    - name: Set Join Command
-      set_fact:
-        join_command: "{{ join_command_raw.stdout_lines[0] }}"
+    - name: Install network plugin (Flannel)
+      command: sudo -u vagrant kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      when: kubeadm_init.rc == 0
