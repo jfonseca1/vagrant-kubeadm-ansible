@@ -61,7 +61,7 @@
       apt:
         name: apt-transport-https
         state: present
-
+    
     - name: Add Docker apt-key
       get_url:
         url: https://download.docker.com/linux/ubuntu/gpg
@@ -75,13 +75,18 @@
         state: present
         update_cache: yes
 
-    - name: Add Kubernetes apt-key
-      get_url:
-        url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
-        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
-        mode: "0644"
-        force: true
+    - name: Ensure /etc/apt/keyrings exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
+    - name: Add Kubernetes GPG key
+      get_url:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        dest: /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+        mode: '0644'
+        
     - name: Add Kubernetes APT repository
       apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
