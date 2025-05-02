@@ -1,4 +1,4 @@
-IMAGE_NAME = "tknerr/baseimage-ubuntu:18.04"
+IMAGE_NAME = "ubuntu/focal64"
 N = 2
 Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
