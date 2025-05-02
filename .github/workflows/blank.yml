@@ -46,6 +46,13 @@ jobs:
       - name: Run Ansible
         run: |
           vagrant ssh k8s-master -c "sudo ansible-playbook /vagrant/kubernetes-setup/master-playbook.yml"
+      
+      - name: Get join command
+        id: get-join-command
+        run: |
+          JOIN_COMMAND=$(vagrant ssh k8s-master -c "sudo kubeadm token create --print-join-command" | tr -d '\r')
+          echo "JOIN_COMMAND=${JOIN_COMMAND}" >> $GITHUB_ENV
+      
       - name: Verify Docker containers
         run: docker ps -a
   
@@ -91,3 +98,16 @@ jobs:
       run: |
         vagrant ssh node-1 -c "sudo ansible-playbook /vagrant/kubernetes-setup/node-playbook.yml"
         vagrant ssh node-2 -c "sudo ansible-playbook /vagrant/kubernetes-setup/node-playbook.yml"
+    
+    - name: Join workers to cluster
+      run: |
+        JOIN_COMMAND=$(echo "${{ env.JOIN_COMMAND }}" | tr -d '\r')
+        vagrant ssh node-1 -c "sudo $JOIN_COMMAND"
+        vagrant ssh node-2 -c "sudo $JOIN_COMMAND"
+
+    - name: Verify Docker containers
+      run: docker ps -a
+
+    - name: Verify cluster status
+      run: |
+        vagrant ssh k8s-master -c "sudo -u vagrant kubectl get nodes"
