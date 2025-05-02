@@ -37,12 +37,7 @@ jobs:
         run: |
           vagrant up --provider=docker k8s-master
           vagrant ssh k8s-master -c "sudo apt update && sudo apt install -y python3"
-      - name: Prepare system
-        run: |
-          vagrant ssh k8s-master -c "sudo apt-get update
-          sudo apt-get install -y ansible kmod linux-modules-extra-$(uname -r)
-          sudo modprobe br_netfilter
-          sudo modprobe overlay"
+   
       - name: Run Ansible
         run: |
           vagrant ssh k8s-master -c "sudo ansible-playbook /vagrant/kubernetes-setup/master-playbook.yml"
