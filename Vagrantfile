@@ -1,4 +1,4 @@
-IMAGE_NAME = "tknerr/baseimage-ubuntu" 
+IMAGE_NAME = "ubuntu/focal64" 
 N = 2
 
 Vagrant.configure("2") do |config|
