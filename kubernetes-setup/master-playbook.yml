@@ -1,3 +1,4 @@
+
 - name: Kubernetes Dependencies
   hosts: all
   become: yes
@@ -5,6 +6,20 @@
     - name: Updates
       apt:
         update_cache: yes
+    - name: Ensure kernel tools are installed
+      become: yes
+      block:
+        - name: Install kmod package
+          apt:
+            name: kmod
+            state: present
+          when: ansible_os_family == 'Debian'
+    
+        - name: Install kernel headers
+          apt:
+            name: "linux-modules-extra-{{ ansible_kernel }}"
+            state: present
+          when: ansible_os_family == 'Debian'
 
     #- name: Reboot
     #  reboot: {}
