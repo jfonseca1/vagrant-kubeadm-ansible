@@ -1,7 +1,7 @@
 IMAGE_NAME = "tknerr/baseimage-ubuntu:18.04"
 N = 2
 Vagrant.configure("2") do |config|
-    config.ssh.insert_key = false
+    config.ssh.insert_key = true
     config.ssh.username = "vagrant"
     config.ssh.password = "vagrant"
     config.vm.boot_timeout = 600
