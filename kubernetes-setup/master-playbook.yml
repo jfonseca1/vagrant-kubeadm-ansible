@@ -13,7 +13,7 @@
         state: present
         update_cache: yes
 
-   - name: Create keyrings directory
+    - name: Create keyrings directory
       file:
         path: /etc/apt/keyrings
         state: directory
