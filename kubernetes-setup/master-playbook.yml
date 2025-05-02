@@ -147,10 +147,26 @@
       when: ansible_service_mgr == 'systemd'
 
     - name: Load br_netfilter kernel module
-      modprobe:
-        name: br_netfilter
-        state: present
-
+      become: yes
+      block:
+        - name: Check if module is already loaded
+          command: lsmod | grep br_netfilter
+          register: module_check
+          ignore_errors: yes
+          changed_when: false
+    
+        - name: Load module if needed
+          command: modprobe br_netfilter
+          when: module_check.rc != 0
+          
+        - name: Ensure persistent loading
+          copy:
+            dest: /etc/modules-load.d/k8s.conf
+            content: |
+              br_netfilter
+              overlay
+      when: ansible_kernel != 'container'  # Skip if in container
+    
     - name: Set bridge-nf-call-iptables
       sysctl:
         name: net.bridge.bridge-nf-call-iptables
