@@ -173,28 +173,53 @@
     - name: Hold Kubernetes packages
       command: apt-mark hold kubelet kubeadm kubectl
     
-    # 1. Reset any previous installation
-    - name: Clean up previous Kubernetes installation
+    - name: Complete Kubernetes reset
       shell: |
-        kubeadm reset -f || true
-        rm -rf /etc/kubernetes/manifests/*
-        rm -rf /etc/kubernetes/pki/*
-        rm -rf /var/lib/etcd/*
-        rm -rf $HOME/.kube/config
+        # Force reset kubeadm
+        kubeadm reset -f --cri-socket=unix:///run/containerd/containerd.sock
+        
+        # Remove all configuration files
+        rm -rf /etc/kubernetes /var/lib/kubelet /var/lib/etcd /etc/cni/net.d
+        
+        # Clean up home directory
+        rm -rf $HOME/.kube /root/.kube
+        
+        # Clear iptables and IPVS rules
+        iptables -F && iptables -t nat -F && iptables -t mangle -F
+        ipvsadm --clear || true
+        
+        # Remove dangling container artifacts
+        crictl rm -fa || true
+        crictl rmp -fa || true
       args:
         warn: false
 
-    # 2. Ensure containerd is running
-    - name: Verify containerd socket
-      wait_for:
-        path: /run/containerd/containerd.sock
-        timeout: 30
+    # 2. Verify clean state
+    - name: Check for remaining files
+      shell: |
+        ls -la /etc/kubernetes/manifests/ || echo "Clean"
+        ls -la /var/lib/kubelet/ || echo "Clean"
+      register: leftover_files
+      changed_when: "'Clean' not in leftover_files.stdout"
+      failed_when: false
 
-    # 2. Get node IP address
-    - name: Get node IP
-      shell: hostname -i
-      register: node_ip
-      changed_when: false
+    # 3. Initialize cluster with exact version
+    - name: Initialize Kubernetes cluster
+      shell: |
+        kubeadm init \
+          --kubernetes-version=v1.28.15 \
+          --pod-network-cidr=10.244.0.0/16 \
+          --ignore-preflight-errors=Swap \
+          --cri-socket=unix:///run/containerd/containerd.sock \
+          --control-plane-endpoint=192.168.56.10 \
+          --image-repository=registry.k8s.io \
+          --upload-certs \
+          --skip-phases=addon/kube-proxy
+      register: kubeadm_init
+      retries: 3
+      delay: 15
+      until: kubeadm_init.rc == 0
+
 
     # 3. Initialize Kubernetes cluster with all fixes
     - name: Initialize Kubernetes cluster
