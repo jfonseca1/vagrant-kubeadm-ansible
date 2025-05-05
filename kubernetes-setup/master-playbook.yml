@@ -196,7 +196,6 @@
       register: node_ip
       changed_when: false
 
-    # 3. Initialize cluster with proper IP formatting
     - name: Initialize Kubernetes cluster
       shell: |
         kubeadm init \
@@ -204,12 +203,8 @@
           --ignore-preflight-errors=Swap \
           --cri-socket=unix:///run/containerd/containerd.sock \
           --upload-certs \
-          --control-plane-endpoint={{ node_ip.stdout.strip() }}
-      register: kubeadm_init
-      retries: 3
-      delay: 10
-      until: kubeadm_init.rc == 0
-      
+          --control-plane-endpoint=192.168.56.10
+          
     # 4. Set up kubectl configuration
     - name: Configure kubectl
       shell: |
