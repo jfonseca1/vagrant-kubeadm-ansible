@@ -121,16 +121,45 @@
         state: present
         update_cache: yes
 
-    - name: Add Kubernetes GPG key
-      apt_key:
-        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
-        state: present
+    # 2. Add Kubernetes GPG key (new method)
+    - name: Create keyrings directory
+      file:
+        path: /usr/share/keyrings
+        state: directory
+        mode: 0755
 
+    - name: Download and install Kubernetes GPG key
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
+        chmod 644 /usr/share/keyrings/kubernetes-archive-keyring.gpg
+      args:
+        warn: false
+
+    # 3. Add Kubernetes repository (verified)
     - name: Add Kubernetes repository
       apt_repository:
         repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
         state: present
         filename: kubernetes
+        mode: 0644
+
+    # 4. Verify repository setup
+    - name: Update apt package index
+      apt:
+        update_cache: yes
+      register: apt_update
+      until: apt_update is succeeded
+      retries: 3
+      delay: 5
+
+    - name: Verify Kubernetes packages are available
+      command: apt-cache policy kubelet
+      register: kubelet_policy
+      changed_when: false
+
+    - name: Show available Kubernetes versions
+      debug:
+        var: kubelet_policy.stdout_lines
 
     - name: Install Kubernetes packages
       apt:
