@@ -16,12 +16,16 @@
         name: containerd
         state: present
         update_cache: yes
-
-    - name: Create containerd config directory
+        
+    - name: Create containerd directory structure
       file:
-        path: /etc/containerd
+        path: "{{ item }}"
         state: directory
         mode: 0755
+      loop:
+        - /etc/containerd
+        - /run/containerd
+        - /var/lib/containerd
 
     - name: Generate default containerd config
       command: containerd config default > /etc/containerd/config.toml
