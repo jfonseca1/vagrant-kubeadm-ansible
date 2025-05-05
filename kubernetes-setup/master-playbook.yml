@@ -206,7 +206,7 @@
           --upload-certs \
           --control-plane-endpoint=192.168.56.10 \
           --image-repository=registry.k8s.io \
-          --kubernetes-version=v1.28.0
+          --kubernetes-version=v1.28.15
       register: kubeadm_init
       retries: 3
       delay: 30
