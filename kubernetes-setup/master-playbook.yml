@@ -101,25 +101,50 @@
           Socket status: ls -la /run/containerd/containerd.sock
       when: ctr_test.rc != 0
 
-    # 3. Kernel modules and sysctl
-    - name: Load kernel modules
-      modprobe:
-        name: "{{ item }}"
+    # 1. Install required packages (including kmod for modprobe)
+    - name: Install essential packages
+      apt:
+        name:
+          - kmod
+          - linux-modules-extra-$(uname -r)
         state: present
-      loop:
-        - br_netfilter
-        - overlay
+        update_cache: yes
 
-    - name: Configure sysctl
-      sysctl:
-        name: "{{ item.key }}"
-        value: "{{ item.value }}"
-        state: present
-        reload: yes
-      with_items:
-        - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
-        - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    # 2. Alternative kernel module loading (when modprobe isn't available)
+    - name: Check if modules are already loaded
+      shell: |
+        lsmod | grep -q br_netfilter && lsmod | grep -q overlay
+      register: modules_loaded
+      ignore_errors: yes
+      changed_when: false
 
+    - name: Load kernel modules (alternative method)
+      shell: |
+        # Try direct module loading
+        insmod /lib/modules/$(uname -r)/kernel/net/bridge/br_netfilter.ko || true
+        insmod /lib/modules/$(uname -r)/kernel/fs/overlayfs/overlay.ko || true
+        
+        # Verify modules are loaded
+        grep -q br_netfilter /proc/modules && grep -q overlay /proc/modules
+      args:
+        warn: false
+      when: modules_loaded.rc != 0
+      register: modules_load_result
+
+    - name: Fail if modules couldn't be loaded
+      fail:
+        msg: "Failed to load required kernel modules (br_netfilter and overlay)"
+      when: modules_load_result is defined and modules_load_result.rc != 0
+
+    # 3. Configure sysctl parameters (works without modules)
+    - name: Configure sysctl parameters
+      shell: |
+        echo 'net.bridge.bridge-nf-call-ip6tables = 1' >> /etc/sysctl.conf
+        echo 'net.bridge.bridge-nf-call-iptables = 1' >> /etc/sysctl.conf
+        sysctl -p
+      args:
+        warn: false
+        
     # 4. Install Kubernetes components
     - name: Install prerequisites
       apt:
