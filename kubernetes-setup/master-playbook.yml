@@ -196,6 +196,7 @@
       register: node_ip
       changed_when: false
 
+    # 3. Initialize Kubernetes cluster with all fixes
     - name: Initialize Kubernetes cluster
       shell: |
         kubeadm init \
@@ -203,7 +204,13 @@
           --ignore-preflight-errors=Swap \
           --cri-socket=unix:///run/containerd/containerd.sock \
           --upload-certs \
-          --control-plane-endpoint=192.168.56.10
+          --control-plane-endpoint=192.168.56.10 \
+          --image-repository=registry.k8s.io \
+          --kubernetes-version=v1.28.0
+      register: kubeadm_init
+      retries: 3
+      delay: 30
+      until: kubeadm_init.rc == 0
           
     # 4. Set up kubectl configuration
     - name: Configure kubectl
