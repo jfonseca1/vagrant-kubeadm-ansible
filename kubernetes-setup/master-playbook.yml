@@ -173,86 +173,119 @@
     - name: Hold Kubernetes packages
       command: apt-mark hold kubelet kubeadm kubectl
     
-    - name: Complete Kubernetes reset
-      shell: |
-        # Force reset kubeadm
-        kubeadm reset -f --cri-socket=unix:///run/containerd/containerd.sock
-        
-        # Remove all configuration files
-        rm -rf /etc/kubernetes /var/lib/kubelet /var/lib/etcd /etc/cni/net.d
-        
-        # Clean up home directory
-        rm -rf $HOME/.kube /root/.kube
-        
-        # Clear iptables and IPVS rules
-        iptables -F && iptables -t nat -F && iptables -t mangle -F
-        ipvsadm --clear || true
-        
-        # Remove dangling container artifacts
-        crictl rm -fa || true
-        crictl rmp -fa || true
-      args:
-        warn: false
+    # 1. Nuclear cleanup with verification
+    - name: Atomic cleanup of Kubernetes
+      block:
+        - name: Stop all Kubernetes services
+          shell: |
+            systemctl stop kubelet || true
+            pkill -f kubelet || true
+            pkill -f kube-apiserver || true
 
-    # 2. Verify clean state
-    - name: Check for remaining files
-      shell: |
-        ls -la /etc/kubernetes/manifests/ || echo "Clean"
-        ls -la /var/lib/kubelet/ || echo "Clean"
-      register: leftover_files
-      changed_when: "'Clean' not in leftover_files.stdout"
-      failed_when: false
+        - name: Remove all Kubernetes artifacts
+          shell: |
+            # Filesystem cleanup
+            find /etc/kubernetes /var/lib/kubelet /var/lib/etcd -delete 2>/dev/null || true
+            rm -rf ~/.kube /root/.kube
+            
+            # Network cleanup
+            iptables -F && iptables -t nat -F && iptables -t mangle -F
+            ipvsadm --clear || true
+            
+            # Container cleanup
+            crictl rm -fa 2>/dev/null || true
+            crictl rmp -fa 2>/dev/null || true
+            
+            # Verify complete removal
+            [ ! -d /etc/kubernetes ] && [ ! -d /var/lib/kubelet ] && \
+            echo "Cleanup successful" || exit 1
+          args:
+            warn: false
+          register: cleanup_result
+          retries: 3
+          delay: 5
+          until: cleanup_result.rc == 0
 
-    # 3. Initialize cluster with exact version
-    - name: Initialize Kubernetes cluster
-      shell: |
-        kubeadm init \
-          --kubernetes-version=v1.28.15 \
-          --pod-network-cidr=10.244.0.0/16 \
-          --ignore-preflight-errors=Swap \
-          --cri-socket=unix:///run/containerd/containerd.sock \
-          --control-plane-endpoint=192.168.56.10 \
-          --image-repository=registry.k8s.io \
-          --upload-certs \
-          --skip-phases=addon/kube-proxy
-      register: kubeadm_init
-      retries: 3
-      delay: 15
-      until: kubeadm_init.rc == 0
+      rescue:
+        - name: Emergency filesystem check
+          shell: |
+            ls -la /etc/kubernetes/ /var/lib/kubelet/ || true
+            mount | grep -E 'kubelet|kubernetes' || true
+          register: fs_check
+          changed_when: false
 
+        - name: Fail with diagnostic info
+          fail:
+            msg: |
+              Critical cleanup failed! Manual intervention required.
+              Remaining files:
+              {{ fs_check.stdout }}
+              Suggested fix:
+              1. Reboot the node
+              2. Verify no Kubernetes processes are running (ps aux | grep -E 'kube|etcd')
+              3. Manually delete /etc/kubernetes and /var/lib/kubelet
 
-    # 3. Initialize Kubernetes cluster with all fixes
-    - name: Initialize Kubernetes cluster
-      shell: |
-        kubeadm init \
-          --pod-network-cidr=10.244.0.0/16 \
-          --ignore-preflight-errors=Swap \
-          --cri-socket=unix:///run/containerd/containerd.sock \
-          --upload-certs \
-          --control-plane-endpoint=192.168.56.10 \
-          --image-repository=registry.k8s.io \
-          --kubernetes-version=v1.28.15
-      register: kubeadm_init
-      retries: 3
-      delay: 30
-      until: kubeadm_init.rc == 0
-          
-    # 4. Set up kubectl configuration
-    - name: Configure kubectl
-      shell: |
-        mkdir -p $HOME/.kube
-        cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-        chown $(id -u):$(id -g) $HOME/.kube/config
-      when: kubeadm_init.rc == 0
+    # 2. Initialize with atomic operations
+    - name: Atomic cluster initialization
+      block:
+        - name: Verify clean environment
+          shell: |
+            [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && \
+            [ ! -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] && \
+            echo "Environment clean" || exit 1
+          changed_when: false
 
-    # 5. Install network plugin (Flannel)
-    - name: Install Flannel CNI
-      shell: |
-        kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-      when: kubeadm_init.rc == 0
-      
+        - name: Initialize Kubernetes cluster
+          shell: |
+            set -o pipefail
+            kubeadm init \
+              --kubernetes-version=v1.28.15 \
+              --pod-network-cidr=10.244.0.0/16 \
+              --ignore-preflight-errors=Swap \
+              --cri-socket=unix:///run/containerd/containerd.sock \
+              --control-plane-endpoint=192.168.56.10 \
+              --image-repository=registry.k8s.io \
+              --upload-certs \
+              --skip-phases=addon/kube-proxy 2>&1 | tee /var/log/kubeadm-init.log
+          register: init_result
+          retries: 2
+          delay: 10
 
+      rescue:
+        - name: Capture initialization logs
+          shell: cat /var/log/kubeadm-init.log
+          register: init_logs
+          changed_when: false
 
+        - name: Diagnostic dump
+          debug:
+            msg: |
+              INITIALIZATION FAILED!
+              Logs:
+              {{ init_logs.stdout }}
+              Suggested actions:
+              1. Check containerd: crictl ps -a
+              2. Verify network: ip addr show
+              3. Check kernel: uname -a
+              4. Inspect logs: journalctl -u kubelet -n 100
+
+    # 3. Post-initialization setup
+    - name: Configure cluster access
+      block:
+        - name: Set up kubectl config
+          shell: |
+            mkdir -p $HOME/.kube
+            cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+            chmod 600 $HOME/.kube/config
+
+        - name: Verify cluster status
+          shell: kubectl get nodes
+          register: cluster_status
+          retries: 3
+          delay: 5
+          until: cluster_status.rc == 0
+
+      when: init_result is succeeded
   handlers:
     - name: restart containerd
       systemd:
