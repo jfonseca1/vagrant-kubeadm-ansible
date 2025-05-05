@@ -10,14 +10,14 @@
       args:
         warn: false
 
-     # 1. Ensure containerd is installed
+ # 1. Install containerd package
     - name: Install containerd
       apt:
         name: containerd
         state: present
         update_cache: yes
 
-    # 2. Create directory structure
+    # 2. Create necessary directories
     - name: Create containerd directories
       file:
         path: "{{ item }}"
@@ -28,55 +28,78 @@
         - /run/containerd
         - /var/lib/containerd
 
-    # 3. Create config file with fallback content if default generation fails
-    - name: Ensure config file exists
-      block:
-        - name: Try to generate default config
-          command: containerd config default > /etc/containerd/config.toml
-          args:
-            creates: /etc/containerd/config.toml
-          register: config_gen
-          ignore_errors: yes
+    # 3. Ensure config file exists with valid content
+    - name: Create containerd config
+      copy:
+        dest: /etc/containerd/config.toml
+        content: |
+          version = 2
+          [plugins]
+            [plugins."io.containerd.grpc.v1.cri"]
+              sandbox_image = "registry.k8s.io/pause:3.8"
+              [plugins."io.containerd.grpc.v1.cri".containerd]
+                snapshotter = "overlayfs"
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                    runtime_type = "io.containerd.runc.v2"
+                    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                      SystemdCgroup = false
 
-        - name: Create minimal config if generation failed
-          copy:
-            dest: /etc/containerd/config.toml
-            content: |
-              version = 2
-              [plugins]
-                [plugins."io.containerd.grpc.v1.cri"]
-                  sandbox_image = "registry.k8s.io/pause:3.8"
-                  [plugins."io.containerd.grpc.v1.cri".containerd]
-                    snapshotter = "overlayfs"
-                    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
-                      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-                        runtime_type = "io.containerd.runc.v2"
-          when: config_gen is failed or config_gen.rc != 0
+    # 4. Create systemd drop-in for non-systemd environments
+    - name: Create containerd service configuration
+      copy:
+        dest: /etc/systemd/system/containerd.service.d/override.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart=/usr/bin/containerd --config /etc/containerd/config.toml
+      when: ansible_service_mgr == "systemd"
 
-    # 4. Start containerd (non-systemd method)
-    - name: Start containerd service
+    # 5. Start and enable containerd (systemd)
+    - name: Start containerd (systemd)
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      when: ansible_service_mgr == "systemd"
+
+    # 6. Alternative start for non-systemd environments
+    - name: Start containerd (non-systemd)
       shell: |
-        # Kill any existing containerd processes
+        # Stop any running containerd
         pkill containerd || true
-        # Start new instance
-        nohup containerd --config /etc/containerd/config.toml >/var/log/containerd.log 2>&1 &
-        echo $! > /run/containerd/pid
-        sleep 3  # Wait for service to start
+        # Clean up old socket
+        rm -f /run/containerd/containerd.sock
+        # Start fresh instance
+        nohup /usr/bin/containerd --config /etc/containerd/config.toml >/var/log/containerd.log 2>&1 &
+        # Wait for socket to be created
+        timeout 30 bash -c 'until [ -S /run/containerd/containerd.sock ]; do sleep 1; done'
       args:
         warn: false
+      when: ansible_service_mgr != "systemd"
 
-    # 5. Verify containerd is running
-    - name: Check containerd status
-      shell: |
-        ctr version
-      register: containerd_status
+    # 7. Verify containerd is running properly
+    - name: Verify containerd socket
+      wait_for:
+        path: /run/containerd/containerd.sock
+        timeout: 30
+
+    - name: Test containerd connectivity
+      command: ctr version
+      register: ctr_test
       changed_when: false
-      failed_when: containerd_status.rc != 0
+      retries: 3
+      delay: 5
+      until: ctr_test.rc == 0
 
-    - name: Fail if containerd not running
+    - name: Fail if containerd not working
       fail:
-        msg: "Containerd failed to start - check /var/log/containerd.log"
-      when: containerd_status.rc != 0
+        msg: |
+          Containerd failed to start properly.
+          Check logs with: journalctl -u containerd || cat /var/log/containerd.log
+          Socket status: ls -la /run/containerd/containerd.sock
+      when: ctr_test.rc != 0
 
     # 3. Kernel modules and sysctl
     - name: Load kernel modules
