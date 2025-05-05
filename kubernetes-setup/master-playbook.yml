@@ -10,14 +10,15 @@
       args:
         warn: false
 
-    # 2. Install containerd without systemd
+     # 1. Ensure containerd is installed
     - name: Install containerd
       apt:
         name: containerd
         state: present
         update_cache: yes
-        
-    - name: Create containerd directory structure
+
+    # 2. Create directory structure
+    - name: Create containerd directories
       file:
         path: "{{ item }}"
         state: directory
@@ -27,24 +28,55 @@
         - /run/containerd
         - /var/lib/containerd
 
-    - name: Generate default containerd config
-      command: containerd config default > /etc/containerd/config.toml
-      args:
-        creates: /etc/containerd/config.toml
+    # 3. Create config file with fallback content if default generation fails
+    - name: Ensure config file exists
+      block:
+        - name: Try to generate default config
+          command: containerd config default > /etc/containerd/config.toml
+          args:
+            creates: /etc/containerd/config.toml
+          register: config_gen
+          ignore_errors: yes
 
-    - name: Configure containerd
-      replace:
-        path: /etc/containerd/config.toml
-        regexp: 'sandbox_image = .*'
-        replace: 'sandbox_image = "registry.k8s.io/pause:3.8"'
+        - name: Create minimal config if generation failed
+          copy:
+            dest: /etc/containerd/config.toml
+            content: |
+              version = 2
+              [plugins]
+                [plugins."io.containerd.grpc.v1.cri"]
+                  sandbox_image = "registry.k8s.io/pause:3.8"
+                  [plugins."io.containerd.grpc.v1.cri".containerd]
+                    snapshotter = "overlayfs"
+                    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                        runtime_type = "io.containerd.runc.v2"
+          when: config_gen is failed or config_gen.rc != 0
 
-    - name: Start containerd
+    # 4. Start containerd (non-systemd method)
+    - name: Start containerd service
       shell: |
-        mkdir -p /run/containerd
-        containerd >/var/log/containerd.log 2>&1 &
-        sleep 3  # Give containerd time to start
+        # Kill any existing containerd processes
+        pkill containerd || true
+        # Start new instance
+        nohup containerd --config /etc/containerd/config.toml >/var/log/containerd.log 2>&1 &
+        echo $! > /run/containerd/pid
+        sleep 3  # Wait for service to start
       args:
         warn: false
+
+    # 5. Verify containerd is running
+    - name: Check containerd status
+      shell: |
+        ctr version
+      register: containerd_status
+      changed_when: false
+      failed_when: containerd_status.rc != 0
+
+    - name: Fail if containerd not running
+      fail:
+        msg: "Containerd failed to start - check /var/log/containerd.log"
+      when: containerd_status.rc != 0
 
     # 3. Kernel modules and sysctl
     - name: Load kernel modules
