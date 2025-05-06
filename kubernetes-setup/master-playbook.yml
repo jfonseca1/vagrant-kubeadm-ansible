@@ -135,53 +135,47 @@
         state: present
         update_cache: yes
 
-    # Cluster Initialization
-    - name: Cleanup existing Kubernetes installation
-      block:
-        - name: Stop Kubernetes services
-          shell: |
-            pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-            sleep 5
-            pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-            { command -v crictl >/dev/null && crictl rm -fa; } || true
-            [ -f /var/run/kubelet.pid ] && { kill -9 $(cat /var/run/kubelet.pid); rm -f /var/run/kubelet.pid; } || true
-            exit 0
-          args:
-            warn: false
-          ignore_errors: yes
-
-        - name: Remove Kubernetes artifacts
-          shell: |
-            find /etc/kubernetes -mindepth 1 -delete || true
-            find /var/lib/kubelet -mindepth 1 -not -name '.kubelet-keep' -delete || true
-            iptables -F && iptables -t nat -F && iptables -t mangle -F || true
-            ipvsadm --clear || true
-            [ ! -d /etc/kubernetes ] && [ ! -d /var/lib/kubelet ] && echo "Cleanup successful" || exit 1
-          args:
-            warn: false
-          register: cleanup_result
-          retries: 3
-          delay: 5
-          until: cleanup_result.rc == 0
-
-      rescue:
-        - name: Force cleanup and reboot if needed
-          shell: |
-            { command -v crictl >/dev/null && crictl rmp -fa; } || true
-            reboot
-          async: 60
-          poll: 0
-          ignore_errors: yes
-
-        - name: Provide cleanup instructions
-          fail:
-            msg: |
-              Cleanup failed! Manual steps required:
-              1. Reboot: sudo reboot
-              2. Verify no processes: pgrep -f "kube|etcd" || echo "Clean"
-              3. Delete directories:
-                 sudo rm -rf /etc/kubernetes/*
-                 sudo find /var/lib/kubelet -mindepth 1 -not -name ".kubelet-keep" -delete
+    - name: Install ipvsadm if missing
+        apt:
+          name: ipvsadm
+          state: present
+        when: "'ipvsadm' not in ansible_facts.packages"
+  
+      - name: Perform comprehensive cleanup
+        block:
+          - name: Stop all Kubernetes processes
+            shell: |
+              pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+              sleep 5
+              pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+              { command -v crictl >/dev/null && crictl rm -fa; } || true
+              [ -f /var/run/kubelet.pid ] && { kill -9 $(cat /var/run/kubelet.pid); rm -f /var/run/kubelet.pid; } || true
+            args:
+              warn: false
+            ignore_errors: yes
+  
+          - name: Remove all Kubernetes artifacts
+            shell: |
+              find /etc/kubernetes -mindepth 1 -delete || true
+              find /var/lib/kubelet -mindepth 1 -not -name '.kubelet-keep' -delete || true
+              iptables -F && iptables -t nat -F && iptables -t mangle -F || true
+              { command -v ipvsadm >/dev/null && ipvsadm --clear; } || true
+              [ ! -d /etc/kubernetes ] && [ ! -d /var/lib/kubelet ] && echo "Cleanup successful" || exit 1
+            args:
+              warn: false
+            register: cleanup_result
+            retries: 3
+            delay: 5
+            until: cleanup_result.rc == 0
+  
+        rescue:
+          - name: Final cleanup instructions
+            fail:
+              msg: |
+                Automatic cleanup failed. Please manually execute:
+                sudo rm -rf /etc/kubernetes/* /var/lib/kubelet/*
+                sudo iptables -F && sudo iptables -t nat -F && sudo iptables -t mangle -F
+                Then re-run this playbook.
 
     - name: Initialize Kubernetes cluster
       block:
