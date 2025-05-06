@@ -105,6 +105,14 @@
         state: present
         update_cache: yes
 
+    - name: Setup Kubernetes repository
+      block:
+        - name: Create keyrings directory
+          file:
+            path: /usr/share/keyrings
+            state: directory
+            mode: 0755
+            
     - name: Add Kubernetes repository
       apt_repository:
         repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
