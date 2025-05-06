@@ -40,6 +40,24 @@
         name: containerd
         state: present
         update_cache: yes
+    
+    # Containerd Installation
+    - name: Install containerd
+      apt:
+        name: containerd
+        state: present
+        update_cache: yes
+
+    - name: Create containerd directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+      loop:
+        - /etc/containerd
+        - /run/containerd
+        - /var/lib/containerd
+
 
     - name: Configure containerd
       copy:
