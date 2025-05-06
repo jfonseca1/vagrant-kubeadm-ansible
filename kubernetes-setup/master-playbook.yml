@@ -114,11 +114,11 @@
             mode: 0755
             
     - name: Add Kubernetes GPG key
-          shell: |
-            curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
-            chmod 644 /usr/share/keyrings/kubernetes-archive-keyring.gpg
-          args:
-            warn: false        
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
+        chmod 644 /usr/share/keyrings/kubernetes-archive-keyring.gpg
+      args:
+        warn: false        
     
     - name: Add Kubernetes repository
       apt_repository:
