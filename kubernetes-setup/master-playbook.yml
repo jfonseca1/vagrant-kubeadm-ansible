@@ -166,126 +166,74 @@
         - name: Hold Kubernetes packages
           command: apt-mark hold kubelet kubeadm kubectl
 
-    - name: Stop Kubernetes services
+    - name: Initialize Kubernetes cluster
       block:
-        - name: Attempt to stop Kubernetes processes
+        - name: Verify clean environment
           shell: |
-            # First try graceful shutdown
-            pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-            sleep 5
-            
-            # Force kill if still running
-            pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-            sleep 2
-            
-            # Handle kubelet PID file if exists
-            [ -f /var/run/kubelet.pid ] && { kill -9 $(cat /var/run/kubelet.pid); rm -f /var/run/kubelet.pid; } || true
-            
-            # Return success regardless of pkill outcome
-            exit 0
-          args:
-            warn: false
-          register: stop_services
-          changed_when: stop_services.rc == 0
-          ignore_errors: true
-    
-        - name: Verify processes are stopped
-          shell: |
-            ! pgrep -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd'
-          register: verify_stopped
+            [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && \
+            [ ! -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] && \
+            echo "Environment clean" || exit 1
           changed_when: false
-          failed_when: verify_stopped.rc != 0
-          retries: 3
-          delay: 5
     
-      rescue:
-        - name: Force cleanup if stopping failed
-          shell: |
-            # Nuclear option - stop all containers
-            { command -v crictl >/dev/null && crictl rm -fa; } || true
-            { command -v crictl >/dev/null && crictl rmp -fa; } || true
-            
-            # Force remove files
-            find /etc/kubernetes -mindepth 1 -delete || true
-            find /var/lib/kubelet -mindepth 1 -not -name '.kubelet-keep' -delete || true
-            
-            # Clean network
-            iptables -F && iptables -t nat -F && iptables -t mangle -F || true
-            ipvsadm --clear || true
-          args:
-            warn: false
-          when: verify_stopped is failed
-    
-        - name: Reboot if necessary
-          command: reboot
-          async: 60
-          poll: 0
-          when: verify_stopped is failed
-          ignore_errors: true
-    
-        - name: Fail with cleanup instructions
-          fail:
-            msg: |
-              Kubernetes services could not be stopped cleanly.
-              The system has attempted forced cleanup and may need reboot.
-              Manual steps:
-              1. Reboot the node: 'sudo reboot'
-              2. Verify no processes: 'pgrep -f "kube|etcd" || echo "Clean"'
-              3. Delete directories:
-                 'sudo rm -rf /etc/kubernetes/*'
-                 'sudo find /var/lib/kubelet -mindepth 1 -not -name ".kubelet-keep" -delete'
-          when: verify_stopped is failed
         - name: Initialize Kubernetes cluster
-          block:
-            - name: Verify clean environment
-              shell: |
-                [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && \
-                [ ! -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] && \
-                echo "Environment clean" || exit 1
-              changed_when: false
-
-        - name: Run kubeadm init
           shell: |
             set -o pipefail
             kubeadm init \
-              --kubernetes-version=v{{ k8s_version.split('-')[0] }} \
-              --pod-network-cidr={{ pod_network_cidr }} \
+              --kubernetes-version=v1.28.15 \
+              --pod-network-cidr=10.244.0.0/16 \
               --ignore-preflight-errors=Swap \
               --cri-socket=unix:///run/containerd/containerd.sock \
-              --control-plane-endpoint={{ control_plane_endpoint }} \
+              --control-plane-endpoint=192.168.56.10 \
               --image-repository=registry.k8s.io \
               --upload-certs \
               --skip-phases=addon/kube-proxy 2>&1 | tee /var/log/kubeadm-init.log
           register: init_result
           retries: 2
           delay: 10
-
+    
       rescue:
-        - name: Show initialization logs
+        - name: Check if log file exists
+          stat:
+            path: /var/log/kubeadm-init.log
+          register: log_file
+    
+        - name: Capture initialization logs if available
+          shell: cat /var/log/kubeadm-init.log
+          register: init_logs
+          changed_when: false
+          when: log_file.stat.exists
+    
+        - name: Diagnostic dump
           debug:
             msg: |
-              Cluster initialization failed!
+              INITIALIZATION FAILED!
               Logs:
-              {{ lookup('file', '/var/log/kubeadm-init.log') | default('No logs found') }}
+              {% if log_file.stat.exists %}
+              {{ init_logs.stdout | default('No logs captured') }}
+              {% else %}
+              No log file found at /var/log/kubeadm-init.log
+              {% endif %}
               Suggested actions:
-              1. Check containerd status
-              2. Verify network connectivity
-              3. Check system resources
-
-    - name: Configure kubectl
-      block:
-        - name: Setup kubeconfig
-          shell: |
-            mkdir -p $HOME/.kube
-            cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
-            chmod 600 $HOME/.kube/config
-
-        - name: Verify cluster status
-          command: kubectl get nodes
-          register: cluster_status
-          retries: 3
-          delay: 5
-          until: cluster_status.rc == 0
+              1. Check containerd: crictl ps -a
+              2. Verify network: ip addr show
+              3. Check kernel: uname -a
+              4. Check kubelet logs: journalctl -u kubelet -n 100 || cat /var/log/kubelet.log
+          when: init_result is failed
+    
+        - name: Configure kubectl
+          block:
+            - name: Setup kubeconfig
+              shell: |
+                mkdir -p $HOME/.kube
+                cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+                chmod 600 $HOME/.kube/config
+    
+            - name: Verify cluster status
+              command: kubectl get nodes
+              register: cluster_status
+              retries: 3
+              delay: 5
+              until: cluster_status.rc == 0
 
   handlers:
     - name: restart containerd
