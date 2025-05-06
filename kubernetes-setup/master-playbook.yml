@@ -276,22 +276,22 @@
               3. Check kernel: uname -a
               4. Inspect logs: journalctl -u kubelet -n 100 || cat /var/log/kubelet.log
     
-      # 3. Post-initialization setup (unchanged)
-      - name: Configure cluster access
-        block:
-          - name: Set up kubectl config
-            shell: |
-              mkdir -p $HOME/.kube
-              cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
-              chmod 600 $HOME/.kube/config
-      
-          - name: Verify cluster status
-            shell: kubectl get nodes
-            register: cluster_status
-            retries: 3
-            delay: 5
-            until: cluster_status.rc == 0
+        # 3. Post-initialization setup (unchanged)
+        - name: Configure cluster access
+          block:
+            - name: Set up kubectl config
+              shell: |
+                mkdir -p $HOME/.kube
+                cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+                chmod 600 $HOME/.kube/config
         
+            - name: Verify cluster status
+              shell: kubectl get nodes
+              register: cluster_status
+              retries: 3
+              delay: 5
+              until: cluster_status.rc == 0
+            
   handlers:
     - name: restart containerd
       systemd:
