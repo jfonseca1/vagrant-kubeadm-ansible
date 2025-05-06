@@ -135,11 +135,11 @@
         state: present
         update_cache: yes
 
-    - name: Install ipvsadm if missing
-        apt:
-          name: ipvsadm
-          state: present
-        when: "'ipvsadm' not in ansible_facts.packages"
+      - name: Install ipvsadm if missing
+          apt:
+            name: ipvsadm
+            state: present
+          when: "'ipvsadm' not in ansible_facts.packages"
   
       - name: Perform comprehensive cleanup
         block:
