@@ -174,20 +174,20 @@
       command: apt-mark hold kubelet kubeadm kubectl
     
     # 1. Nuclear cleanup with verification for non-systemd
-  - name: Atomic cleanup of Kubernetes
-    block:
-      - name: Stop all Kubernetes services (non-systemd version)
-        shell: |
-          # Stop all kube processes
-          pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-          sleep 2
-          pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-          
-          # Additional cleanup for containerized kubelet
-          if [ -f /var/run/kubelet.pid ]; then
-              kill $(cat /var/run/kubelet.pid) 2>/dev/null || true
-              rm -f /var/run/kubelet.pid
-          fi
+    - name: Atomic cleanup of Kubernetes
+      block:
+        - name: Stop all Kubernetes services (non-systemd version)
+          shell: |
+            # Stop all kube processes
+            pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+            sleep 2
+            pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+            
+            # Additional cleanup for containerized kubelet
+            if [ -f /var/run/kubelet.pid ]; then
+                kill $(cat /var/run/kubelet.pid) 2>/dev/null || true
+                rm -f /var/run/kubelet.pid
+            fi
 
     - name: Remove all Kubernetes artifacts
       shell: |
