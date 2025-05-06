@@ -232,65 +232,65 @@
           2. Verify no Kubernetes processes are running (ps aux | grep -E 'kube|etcd')
           3. Manually delete /etc/kubernetes and /var/lib/kubelet
 
-  # 2. Initialize with atomic operations (unchanged as it's systemd-agnostic)
-  - name: Atomic cluster initialization
-    block:
-      - name: Verify clean environment
-        shell: |
-          [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && \
-          [ ! -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] && \
-          echo "Environment clean" || exit 1
-        changed_when: false
-  
-      - name: Initialize Kubernetes cluster
-        shell: |
-          set -o pipefail
-          kubeadm init \
-            --kubernetes-version=v1.28.15 \
-            --pod-network-cidr=10.244.0.0/16 \
-            --ignore-preflight-errors=Swap \
-            --cri-socket=unix:///run/containerd/containerd.sock \
-            --control-plane-endpoint=192.168.56.10 \
-            --image-repository=registry.k8s.io \
-            --upload-certs \
-            --skip-phases=addon/kube-proxy 2>&1 | tee /var/log/kubeadm-init.log
-        register: init_result
-        retries: 2
-        delay: 10
-  
-    rescue:
-      - name: Capture initialization logs
-        shell: cat /var/log/kubeadm-init.log
-        register: init_logs
-        changed_when: false
-  
-      - name: Diagnostic dump
-        debug:
-          msg: |
-            INITIALIZATION FAILED!
-            Logs:
-            {{ init_logs.stdout }}
-            Suggested actions:
-            1. Check containerd: crictl ps -a
-            2. Verify network: ip addr show
-            3. Check kernel: uname -a
-            4. Inspect logs: journalctl -u kubelet -n 100 || cat /var/log/kubelet.log
-  
-    # 3. Post-initialization setup (unchanged)
-    - name: Configure cluster access
+    # 2. Initialize with atomic operations (unchanged as it's systemd-agnostic)
+    - name: Atomic cluster initialization
       block:
-        - name: Set up kubectl config
+        - name: Verify clean environment
           shell: |
-            mkdir -p $HOME/.kube
-            cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
-            chmod 600 $HOME/.kube/config
+            [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && \
+            [ ! -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] && \
+            echo "Environment clean" || exit 1
+          changed_when: false
     
-        - name: Verify cluster status
-          shell: kubectl get nodes
-          register: cluster_status
-          retries: 3
-          delay: 5
-          until: cluster_status.rc == 0
+        - name: Initialize Kubernetes cluster
+          shell: |
+            set -o pipefail
+            kubeadm init \
+              --kubernetes-version=v1.28.15 \
+              --pod-network-cidr=10.244.0.0/16 \
+              --ignore-preflight-errors=Swap \
+              --cri-socket=unix:///run/containerd/containerd.sock \
+              --control-plane-endpoint=192.168.56.10 \
+              --image-repository=registry.k8s.io \
+              --upload-certs \
+              --skip-phases=addon/kube-proxy 2>&1 | tee /var/log/kubeadm-init.log
+          register: init_result
+          retries: 2
+          delay: 10
+    
+      rescue:
+        - name: Capture initialization logs
+          shell: cat /var/log/kubeadm-init.log
+          register: init_logs
+          changed_when: false
+    
+        - name: Diagnostic dump
+          debug:
+            msg: |
+              INITIALIZATION FAILED!
+              Logs:
+              {{ init_logs.stdout }}
+              Suggested actions:
+              1. Check containerd: crictl ps -a
+              2. Verify network: ip addr show
+              3. Check kernel: uname -a
+              4. Inspect logs: journalctl -u kubelet -n 100 || cat /var/log/kubelet.log
+    
+      # 3. Post-initialization setup (unchanged)
+      - name: Configure cluster access
+        block:
+          - name: Set up kubectl config
+            shell: |
+              mkdir -p $HOME/.kube
+              cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+              chmod 600 $HOME/.kube/config
+      
+          - name: Verify cluster status
+            shell: kubectl get nodes
+            register: cluster_status
+            retries: 3
+            delay: 5
+            until: cluster_status.rc == 0
         
   handlers:
     - name: restart containerd
