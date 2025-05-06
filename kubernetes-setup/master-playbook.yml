@@ -6,9 +6,16 @@
     k8s_version: "1.28.15-1.1"
     pod_network_cidr: "10.244.0.0/16"
     control_plane_endpoint: "192.168.56.10"
+    timestamp: "{{ ansible_date_time.iso8601 }}"
 
   tasks:
-    # System Configuration
+    # System Preparation
+    - name: Ensure log directory exists
+      file:
+        path: /var/log
+        state: directory
+        mode: 0755
+
     - name: Disable swap
       shell: |
         swapoff -a
@@ -16,7 +23,7 @@
       args:
         warn: false
 
-    - name: Configure sysctl parameters
+    - name: Configure kernel parameters
       shell: |
         cat <<EOF | tee /etc/sysctl.d/k8s.conf
         net.ipv4.ip_forward = 1
@@ -27,22 +34,12 @@
       args:
         warn: false
 
-    # Containerd Installation
+    # Container Runtime Setup
     - name: Install containerd
       apt:
         name: containerd
         state: present
         update_cache: yes
-
-    - name: Create containerd directories
-      file:
-        path: "{{ item }}"
-        state: directory
-        mode: 0755
-      loop:
-        - /etc/containerd
-        - /run/containerd
-        - /var/lib/containerd
 
     - name: Configure containerd
       copy:
@@ -60,25 +57,15 @@
                     [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
                       SystemdCgroup = false
 
-    - name: Configure containerd service (systemd)
-      block:
-        - name: Create systemd drop-in
-          copy:
-            dest: /etc/systemd/system/containerd.service.d/override.conf
-            content: |
-              [Service]
-              ExecStart=
-              ExecStart=/usr/bin/containerd --config /etc/containerd/config.toml
-          
-        - name: Start and enable containerd
-          systemd:
-            name: containerd
-            state: started
-            enabled: yes
-            daemon_reload: yes
+    - name: Start containerd
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+        daemon_reload: yes
       when: ansible_service_mgr == "systemd"
 
-    - name: Start containerd (non-systemd)
+    - name: Alternative containerd start (non-systemd)
       shell: |
         pkill containerd || true
         rm -f /run/containerd/containerd.sock
@@ -87,29 +74,6 @@
       args:
         warn: false
       when: ansible_service_mgr != "systemd"
-
-    - name: Verify containerd
-      block:
-        - name: Check containerd socket
-          wait_for:
-            path: /run/containerd/containerd.sock
-            timeout: 30
-        
-        - name: Test containerd connectivity
-          command: ctr version
-          register: ctr_test
-          changed_when: false
-          retries: 3
-          delay: 5
-          until: ctr_test.rc == 0
-        
-        - name: Fail if containerd not working
-          fail:
-            msg: |
-              Containerd failed to start properly.
-              Check logs with: journalctl -u containerd || cat /var/log/containerd.log
-              Socket status: ls -la /run/containerd/containerd.sock
-          when: ctr_test.rc != 0
 
     # Kubernetes Installation
     - name: Install prerequisites
@@ -123,117 +87,138 @@
         state: present
         update_cache: yes
 
-    - name: Setup Kubernetes repository
-      block:
-        - name: Create keyrings directory
-          file:
-            path: /usr/share/keyrings
-            state: directory
-            mode: 0755
-
-        - name: Add Kubernetes GPG key
-          shell: |
-            curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
-            chmod 644 /usr/share/keyrings/kubernetes-archive-keyring.gpg
-          args:
-            warn: false
-
-        - name: Add Kubernetes repo
-          apt_repository:
-            repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
-            state: present
-            filename: kubernetes
-            mode: 0644
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        state: present
+        filename: kubernetes
 
     - name: Install Kubernetes packages
+      apt:
+        name:
+          - kubelet={{ k8s_version }}
+          - kubeadm={{ k8s_version }}
+          - kubectl={{ k8s_version }}
+        state: present
+        update_cache: yes
+
+    # Cluster Initialization
+    - name: Cleanup existing Kubernetes installation
       block:
-        - name: Update apt cache
-          apt:
-            update_cache: yes
-          register: apt_update
-          until: apt_update is succeeded
+        - name: Stop Kubernetes services
+          shell: |
+            pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+            sleep 5
+            pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+            { command -v crictl >/dev/null && crictl rm -fa; } || true
+            [ -f /var/run/kubelet.pid ] && { kill -9 $(cat /var/run/kubelet.pid); rm -f /var/run/kubelet.pid; } || true
+            exit 0
+          args:
+            warn: false
+          ignore_errors: yes
+
+        - name: Remove Kubernetes artifacts
+          shell: |
+            find /etc/kubernetes -mindepth 1 -delete || true
+            find /var/lib/kubelet -mindepth 1 -not -name '.kubelet-keep' -delete || true
+            iptables -F && iptables -t nat -F && iptables -t mangle -F || true
+            ipvsadm --clear || true
+            [ ! -d /etc/kubernetes ] && [ ! -d /var/lib/kubelet ] && echo "Cleanup successful" || exit 1
+          args:
+            warn: false
+          register: cleanup_result
           retries: 3
           delay: 5
+          until: cleanup_result.rc == 0
 
-        - name: Install kube components
-          apt:
-            name:
-              - kubelet={{ k8s_version }}
-              - kubeadm={{ k8s_version }}
-              - kubectl={{ k8s_version }}
-            state: present
-        
-        - name: Hold Kubernetes packages
-          command: apt-mark hold kubelet kubeadm kubectl
+      rescue:
+        - name: Force cleanup and reboot if needed
+          shell: |
+            { command -v crictl >/dev/null && crictl rmp -fa; } || true
+            reboot
+          async: 60
+          poll: 0
+          ignore_errors: yes
+
+        - name: Provide cleanup instructions
+          fail:
+            msg: |
+              Cleanup failed! Manual steps required:
+              1. Reboot: sudo reboot
+              2. Verify no processes: pgrep -f "kube|etcd" || echo "Clean"
+              3. Delete directories:
+                 sudo rm -rf /etc/kubernetes/*
+                 sudo find /var/lib/kubelet -mindepth 1 -not -name ".kubelet-keep" -delete
 
     - name: Initialize Kubernetes cluster
       block:
-        - name: Verify clean environment
-          shell: |
-            [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && \
-            [ ! -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] && \
-            echo "Environment clean" || exit 1
-          changed_when: false
-    
-        - name: Initialize Kubernetes cluster
+        - name: Run kubeadm init
           shell: |
             set -o pipefail
             kubeadm init \
-              --kubernetes-version=v1.28.15 \
-              --pod-network-cidr=10.244.0.0/16 \
+              --kubernetes-version=v{{ k8s_version.split('-')[0] }} \
+              --pod-network-cidr={{ pod_network_cidr }} \
               --ignore-preflight-errors=Swap \
               --cri-socket=unix:///run/containerd/containerd.sock \
-              --control-plane-endpoint=192.168.56.10 \
+              --control-plane-endpoint={{ control_plane_endpoint }} \
               --image-repository=registry.k8s.io \
               --upload-certs \
-              --skip-phases=addon/kube-proxy 2>&1 | tee /var/log/kubeadm-init.log
+              --skip-phases=addon/kube-proxy 2>&1 | tee /var/log/kubeadm-init-{{ timestamp }}.log
           register: init_result
           retries: 2
           delay: 10
-    
+
       rescue:
-        - name: Check if log file exists
-          stat:
-            path: /var/log/kubeadm-init.log
-          register: log_file
-    
-        - name: Capture initialization logs if available
-          shell: cat /var/log/kubeadm-init.log
-          register: init_logs
-          changed_when: false
-          when: log_file.stat.exists
-    
-        - name: Diagnostic dump
-          debug:
-            msg: |
-              INITIALIZATION FAILED!
-              Logs:
-              {% if log_file.stat.exists %}
-              {{ init_logs.stdout | default('No logs captured') }}
-              {% else %}
-              No log file found at /var/log/kubeadm-init.log
-              {% endif %}
-              Suggested actions:
-              1. Check containerd: crictl ps -a
-              2. Verify network: ip addr show
-              3. Check kernel: uname -a
-              4. Check kubelet logs: journalctl -u kubelet -n 100 || cat /var/log/kubelet.log
-          when: init_result is failed
-    
-        - name: Configure kubectl
+        - name: Collect diagnostics
           block:
-            - name: Setup kubeconfig
-              shell: |
-                mkdir -p $HOME/.kube
-                cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
-                chmod 600 $HOME/.kube/config
-    
-            - name: Verify cluster status
-              command: kubectl get nodes
-              register: cluster_status
-              retries: 3
-              delay: 5
-              until: cluster_status.rc == 0
+            - name: Check for init log
+              stat:
+                path: /var/log/kubeadm-init-{{ timestamp }}.log
+              register: init_log
+
+            - name: Capture logs if available
+              shell: cat /var/log/kubeadm-init-{{ timestamp }}.log
+              register: init_logs
+              when: init_log.stat.exists
+
+            - name: Show diagnostics
+              debug:
+                msg: |
+                  INITIALIZATION FAILED!
+                  {% if init_log.stat.exists %}
+                  Logs:
+                  {{ init_logs.stdout | default('No logs captured') }}
+                  {% else %}
+                  No log file found at /var/log/kubeadm-init-{{ timestamp }}.log
+                  {% endif %}
+                  System Info:
+                  - Containerd: {{ lookup('pipe', 'crictl ps -a') }}
+                  - Network: {{ lookup('pipe', 'ip addr show') }}
+                  - Kernel: {{ lookup('pipe', 'uname -a') }}
+          always:
+            - name: Final failure notice
+              fail:
+                msg: "Cluster initialization failed. See previous diagnostics for troubleshooting."
+
+    - name: Configure kubectl
+      block:
+        - name: Setup kubeconfig
+          shell: |
+            mkdir -p $HOME/.kube
+            cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+            chmod 600 $HOME/.kube/config
+
+        - name: Verify cluster status
+          command: kubectl get nodes
+          register: cluster_status
+          retries: 5
+          delay: 10
+          until: cluster_status.rc == 0
+
+      rescue:
+        - name: Cluster setup failed
+          fail:
+            msg: "Failed to configure kubectl or verify cluster status"
 
   handlers:
     - name: restart containerd
