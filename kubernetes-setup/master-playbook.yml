@@ -166,43 +166,75 @@
         - name: Hold Kubernetes packages
           command: apt-mark hold kubelet kubeadm kubectl
 
-    # Cluster Initialization
-    - name: Cleanup existing Kubernetes installation
-      block:
-        - name: Stop Kubernetes services
-          shell: |
-            pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-            sleep 2
-            pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
-            [ -f /var/run/kubelet.pid ] && kill $(cat /var/run/kubelet.pid) 2>/dev/null || true
+- name: Stop Kubernetes services
+  block:
+    - name: Attempt to stop Kubernetes processes
+      shell: |
+        # First try graceful shutdown
+        pkill -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+        sleep 5
+        
+        # Force kill if still running
+        pkill -9 -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd' || true
+        sleep 2
+        
+        # Handle kubelet PID file if exists
+        [ -f /var/run/kubelet.pid ] && { kill -9 $(cat /var/run/kubelet.pid); rm -f /var/run/kubelet.pid; } || true
+        
+        # Return success regardless of pkill outcome
+        exit 0
+      args:
+        warn: false
+      register: stop_services
+      changed_when: stop_services.rc == 0
+      ignore_errors: true
 
-        - name: Remove Kubernetes artifacts
-          shell: |
-            find /etc/kubernetes /var/lib/kubelet /var/lib/etcd -delete 2>/dev/null || true
-            rm -rf ~/.kube /root/.kube
-            iptables -F && iptables -t nat -F && iptables -t mangle -F
-            ipvsadm --clear || true
-            { command -v crictl >/dev/null && crictl rm -fa 2>/dev/null; } || true
-            [ ! -d /etc/kubernetes ] && [ ! -d /var/lib/kubelet ] && echo "Cleanup successful" || exit 1
-          args:
-            warn: false
-          register: cleanup_result
-          retries: 3
-          delay: 5
-          until: cleanup_result.rc == 0
+    - name: Verify processes are stopped
+      shell: |
+        ! pgrep -f 'kubelet|kube-apiserver|kube-scheduler|kube-controller-manager|etcd'
+      register: verify_stopped
+      changed_when: false
+      failed_when: verify_stopped.rc != 0
+      retries: 3
+      delay: 5
 
-      rescue:
-        - name: Diagnostic info
-          fail:
-            msg: |
-              Cleanup failed! Manual intervention required.
-              Remaining files:
-              {{ lookup('pipe', 'ls -la /etc/kubernetes/ /var/lib/kubelet/ || true') }}
-              Suggested fix:
-              1. Reboot the node
-              2. Verify no Kubernetes processes are running
-              3. Manually delete /etc/kubernetes and /var/lib/kubelet
+  rescue:
+    - name: Force cleanup if stopping failed
+      shell: |
+        # Nuclear option - stop all containers
+        { command -v crictl >/dev/null && crictl rm -fa; } || true
+        { command -v crictl >/dev/null && crictl rmp -fa; } || true
+        
+        # Force remove files
+        find /etc/kubernetes -mindepth 1 -delete || true
+        find /var/lib/kubelet -mindepth 1 -not -name '.kubelet-keep' -delete || true
+        
+        # Clean network
+        iptables -F && iptables -t nat -F && iptables -t mangle -F || true
+        ipvsadm --clear || true
+      args:
+        warn: false
+      when: verify_stopped is failed
 
+    - name: Reboot if necessary
+      command: reboot
+      async: 60
+      poll: 0
+      when: verify_stopped is failed
+      ignore_errors: true
+
+    - name: Fail with cleanup instructions
+      fail:
+        msg: |
+          Kubernetes services could not be stopped cleanly.
+          The system has attempted forced cleanup and may need reboot.
+          Manual steps:
+          1. Reboot the node: 'sudo reboot'
+          2. Verify no processes: 'pgrep -f "kube|etcd" || echo "Clean"'
+          3. Delete directories:
+             'sudo rm -rf /etc/kubernetes/*'
+             'sudo find /var/lib/kubelet -mindepth 1 -not -name ".kubelet-keep" -delete'
+      when: verify_stopped is failed
     - name: Initialize Kubernetes cluster
       block:
         - name: Verify clean environment
